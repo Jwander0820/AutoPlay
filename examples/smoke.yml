@@ -1,0 +1,16 @@
+profile:
+  # Optional overrides:
+  # adb_path: C:\Program Files\BlueStacks_nxt\HD-Adb.exe
+  # serial: emulator-5554
+
+steps:
+  - type: screenshot
+    out: artifacts/smoke.png
+  - type: checkpoint_exists
+    path: artifacts/smoke.png
+  - type: wait
+    seconds: 0.5
+  - type: tap
+    x: 100
+    y: 100
+    label: harmless smoke test coordinate

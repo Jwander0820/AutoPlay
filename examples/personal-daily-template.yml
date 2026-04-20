@@ -1,0 +1,17 @@
+steps:
+  - type: screenshot
+    out: artifacts/manual/start.png
+
+  - type: checkpoint_exists
+    path: artifacts/manual/start.png
+
+  - type: tap
+    x: 320
+    y: 540
+    label: open daily mission
+
+  - type: wait
+    seconds: 1
+
+  - type: screenshot
+    out: artifacts/manual/after-open.png
