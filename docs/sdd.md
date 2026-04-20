@@ -25,3 +25,9 @@ AutoPlay uses SDD so automation behavior stays reviewable before it can touch a 
 - Runner tests use fake ADB clients for success and failure cases.
 - Manual tests are reserved for BlueStacks, screenshots, and real taps.
 - User-test reports belong under `artifacts/` and should not be committed.
+
+## Next-stage SDD focus
+
+- Core APIs must be specified before exposing them to AI tool callers.
+- Recorder behavior must be specified before adding interactive commands.
+- AI-facing tool specs must include safety defaults, execution flags, report/audit behavior, and tests for blocked unsafe defaults.

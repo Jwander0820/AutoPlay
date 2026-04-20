@@ -25,6 +25,7 @@ Use this skill for AutoPlay-specific work, including repository setup, feature p
 - SDD workflow lives in `docs/sdd.md`; concrete behavior specs live in `docs/specs/`.
 - User testing notes and manual workflow live in `docs/user-testing.md`.
 - Personal script authoring workflow lives in `docs/personal-scripts.md`.
+- Next-stage handoff lives in `docs/next-stage.md`.
 - Maintenance habits live in `docs/maintenance.md`.
 - Commits are created only when explicitly requested.
 - If a tool or framework is introduced later, follow its standard layout instead of inventing a custom one.

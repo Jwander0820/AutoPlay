@@ -24,6 +24,7 @@ Use the project skill at `skills/autoplay/SKILL.md` when work involves AutoPlay-
 - Maintenance loop: `docs/maintenance.md`
 - User testing guide: `docs/user-testing.md`
 - Personal script workflow: `docs/personal-scripts.md`
+- Next-stage handoff: `docs/next-stage.md`
 - Implemented specs: `docs/specs/`
 
 ## Autonomous maintenance loop
@@ -32,6 +33,13 @@ Use the project skill at `skills/autoplay/SKILL.md` when work involves AutoPlay-
 - Prefer adding diagnostics before adding more automation surface.
 - Keep the project runnable without BlueStacks for unit tests.
 - Preserve safety defaults: validation first, dry-run taps by default, explicit flags for device input.
+
+## Next stage direction
+
+- Build a small guided tool for users to create scripts without hand-writing YAML.
+- API-ize core actions so agents can call typed functions such as `tap(x, y)`, `screenshot(path)`, `wait(seconds)`, `validate(script)`, and `run(script)`.
+- Keep AI-facing APIs behind the same safety model: dry-run by default, explicit execution flags, validation before device input, and JSON reports for every run.
+- Do not give AI an unrestricted loop that freely clicks the device. Prefer bounded tool calls, step budgets, and reviewable plans/scripts.
 
 ## Git workflow
 
