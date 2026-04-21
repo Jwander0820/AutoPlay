@@ -64,7 +64,15 @@ If you want the browser recorder to execute each click and refresh automatically
 py -m autoplay record-ui scripts\user-test-daily.yml --screenshot artifacts\manual\user-test-start.png --capture --allow-device-input
 ```
 
-Then enable `Execute click, wait, and capture next screen` in the browser. Each screenshot click will send a real tap, wait for the configured wait seconds, capture the next screen, and append the tap/wait/screenshot steps. Use this only on safe screens.
+If ADB reports more than one device, add the target serial:
+
+```powershell
+py -m autoplay record-ui scripts\user-test-daily.yml --screenshot artifacts\manual\user-test-start.png --capture --allow-device-input --serial emulator-5554
+```
+
+Then switch the browser click mode to device capture. Each screenshot click will send a real tap, wait for the configured wait seconds or until the screen stabilizes in auto mode, capture the next screen, and append the tap/wait/screenshot steps. Use this only on safe screens.
+
+The browser UI can also test the current YAML directly. Use the dry-run test first; only use the real test button after validation and on a safe screen.
 
 If you already have a screenshot, omit `--capture`:
 
@@ -139,7 +147,7 @@ py -m autoplay run examples\smoke.yml --execute-taps --report-out artifacts\repo
 For agent-controlled real taps, both flags are required:
 
 ```powershell
-py -m autoplay agent-run examples\smoke.yml --execute-taps --allow-device-input --report-out artifacts\reports\smoke-agent-real.json --audit-out artifacts\agent\smoke-agent-real.jsonl
+py -m autoplay agent-run examples\smoke.yml --execute-taps --allow-device-input --report-out artifacts\reports\smoke-agent-real.json --audit-out artifacts\agent\smoke-agent-real.jsonl --serial emulator-5554
 ```
 
 Do not run this until the dry-run report, screenshots, and audit log look correct.

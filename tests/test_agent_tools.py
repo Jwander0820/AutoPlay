@@ -116,7 +116,13 @@ steps:
             with mock.patch("autoplay.api.run", return_value=RunnerReport(dry_run_taps=True)) as run:
                 session.run(script, report_out=tmp_path / "artifacts" / "reports" / "run.json", intent="daily safe routine")
 
-            run.assert_called_once_with(script, execute_taps=False, report_out=tmp_path / "artifacts" / "reports" / "run.json")
+            run.assert_called_once_with(
+                script,
+                execute_taps=False,
+                report_out=tmp_path / "artifacts" / "reports" / "run.json",
+                adb_path=None,
+                serial=None,
+            )
 
 
 def _read_audit(path: Path) -> list[dict]:

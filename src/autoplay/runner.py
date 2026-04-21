@@ -166,14 +166,19 @@ class Runner:
         return report
 
 
-def run_script_file(path: str | Path, dry_run_taps: bool = False) -> RunnerReport:
+def run_script_file(
+    path: str | Path,
+    dry_run_taps: bool = False,
+    adb_path: str | None = None,
+    serial: str | None = None,
+) -> RunnerReport:
     script = load_script(path)
     validation = validate_script(script)
     if not validation.ok:
         messages = "\n".join(issue.message for issue in validation.errors)
         raise RunnerError(f"Script validation failed:\n{messages}")
-    adb_path = resolve_adb_path(script.profile.adb_path)
-    adb_client = AdbClient(adb_path=adb_path, serial=script.profile.serial)
+    resolved_adb_path = resolve_adb_path(adb_path if adb_path is not None else script.profile.adb_path)
+    adb_client = AdbClient(adb_path=resolved_adb_path, serial=serial if serial is not None else script.profile.serial)
     return Runner(adb_client, dry_run_taps=dry_run_taps).run_script(script)
 
 

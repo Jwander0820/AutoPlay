@@ -21,6 +21,7 @@ Move AutoPlay from a CLI proof of concept into a user-friendly script creation t
 - `py -m autoplay record-ui <script.yml> --screenshot <screen.png>` starts a local recorder UI that saves YAML directly and validates it.
 - `py -m autoplay record-clicks <script.yml>` experimentally records live Windows clicks inside a BlueStacks window into YAML tap steps.
 - `record-ui` supports continuous capture and an explicit opt-in Tap + Wait + Capture loop for multi-screen flows.
+- `record-ui` has a Traditional Chinese workspace UI with script-only/device modes, manual/auto wait modes, dry-run/real script test buttons, profile serial preservation, and auto wait-until-screen-stable support for tap capture.
 
 ## Proposed next feature
 
@@ -95,5 +96,7 @@ AI-facing tools should call this API rather than shelling out to CLI commands.
 `0011-live-click-recorder.md` is experimental for Windows-only live click capture.
 
 `0012-continuous-recorder-ui.md` is implemented for multi-screen record flows.
+
+`0013-recorder-ui-refresh.md` is implemented for the Chinese UI refresh and auto wait handling.
 
 Next, test coordinate calibration on real BlueStacks, add template-cropping support, and build a first decision loop that uses screenshots and template matches to choose the next safe YAML/script step before any real tap execution.

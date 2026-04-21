@@ -2,6 +2,7 @@ from pathlib import Path
 import json
 import tempfile
 import unittest
+from unittest import mock
 
 from autoplay.agent_runner import agent_run_script
 from autoplay.agent_tools import SafetyError
@@ -67,6 +68,29 @@ steps:
 
             with self.assertRaisesRegex(SafetyError, "Real tap execution"):
                 agent_run_script(script, artifact_root=tmp_path / "artifacts", execute_taps=True)
+
+    def test_agent_run_passes_adb_target_to_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            script = tmp_path / "daily.yml"
+            script.write_text(
+                """
+steps:
+  - type: wait
+    seconds: 0
+""",
+                encoding="utf-8",
+            )
+
+            with mock.patch("autoplay.agent_runner.AgentSession") as session_class:
+                session = session_class.return_value
+                session.validate.return_value.ok = True
+                session.run.return_value.status = "ok"
+                agent_run_script(script, artifact_root=tmp_path / "artifacts", adb_path="adb", serial="emulator-5554")
+
+            session_class.assert_called_once()
+            self.assertEqual(session_class.call_args.kwargs["adb_path"], "adb")
+            self.assertEqual(session_class.call_args.kwargs["serial"], "emulator-5554")
 
 
 if __name__ == "__main__":

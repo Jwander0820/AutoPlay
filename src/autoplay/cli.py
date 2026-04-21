@@ -98,6 +98,8 @@ def build_parser() -> argparse.ArgumentParser:
     agent_run.add_argument("--intent", default="daily task dry run", help="Short safe intent label for audit logs.")
     agent_run.add_argument("--execute-taps", action="store_true", help="Request real tap execution.")
     agent_run.add_argument("--allow-device-input", action="store_true", help="Allow real device input when --execute-taps is also set.")
+    agent_run.add_argument("--adb-path", help="Override HD-Adb.exe path for script execution.")
+    agent_run.add_argument("--serial", help="ADB serial to target during script execution.")
     agent_run.set_defaults(func=_agent_run)
 
     return parser
@@ -123,7 +125,7 @@ def _doctor(args: argparse.Namespace) -> int:
 def _screenshot(args: argparse.Namespace) -> int:
     result = api.screenshot(args.out, adb_path=args.adb_path, serial=args.serial)
     if not result.ok:
-        print(f"ERROR: screencap failed with exit {result.returncode}: {result.stderr}", file=sys.stderr)
+        _print_adb_failure("screencap", result, adb_path=args.adb_path, serial=args.serial)
         return 1
     print(f"Wrote screenshot: {args.out}")
     return 0
@@ -134,7 +136,7 @@ def _click_map(args: argparse.Namespace) -> int:
         report = capture_click_map(args.screenshot, args.out, script_path=args.script_out, adb_path=args.adb_path, serial=args.serial)
         result = report.screenshot_result
         if result is not None and not result.ok:
-            print(f"ERROR: screencap failed with exit {result.returncode}: {result.stderr}", file=sys.stderr)
+            _print_adb_failure("screencap", result, adb_path=args.adb_path, serial=args.serial)
             return 1
     else:
         report = write_click_map(args.screenshot, args.out, script_path=args.script_out)
@@ -152,7 +154,7 @@ def _tap(args: argparse.Namespace) -> int:
         print("Dry-run only. Pass --yes to send the tap.")
         return 0
     if not result.ok:
-        print(f"ERROR: tap failed with exit {result.returncode}: {result.stderr}", file=sys.stderr)
+        _print_adb_failure("tap", result, adb_path=args.adb_path, serial=args.serial)
         return 1
     print("Tap sent.")
     return 0
@@ -205,7 +207,7 @@ def _record_ui(args: argparse.Namespace) -> int:
     )
     result = capture.screenshot_result
     if result is not None and not result.ok:
-        print(f"ERROR: screencap failed with exit {result.returncode}: {result.stderr}", file=sys.stderr)
+        _print_adb_failure("screencap", result, adb_path=args.adb_path, serial=args.serial)
         return 1
 
     ready = create_recorder_server(capture.config)
@@ -224,6 +226,24 @@ def _record_ui(args: argparse.Namespace) -> int:
     finally:
         ready.server.server_close()
     return 0
+
+
+def _print_adb_failure(context: str, result, adb_path: str | None = None, serial: str | None = None) -> None:
+    stderr = result.stderr.strip()
+    print(f"ERROR: {context} failed with exit {result.returncode}: {stderr}", file=sys.stderr)
+    if serial or "more than one device/emulator" not in stderr:
+        return
+
+    report = api.doctor(adb_path=adb_path)
+    serial_line = next((line for line in report.lines if line.startswith("Connected devices: ")), "")
+    serials = [item.strip() for item in serial_line.removeprefix("Connected devices: ").split(",") if item.strip()]
+    if serials:
+        print("ADB found multiple devices. Choose one serial and rerun with --serial:", file=sys.stderr)
+        for candidate in serials:
+            print(f"  --serial {candidate}", file=sys.stderr)
+        print(f"Example: add --serial {serials[0]} to your command.", file=sys.stderr)
+    else:
+        print("ADB found multiple devices. Run `py -m autoplay doctor` and rerun with the correct --serial value.", file=sys.stderr)
 
 
 def _record_clicks(args: argparse.Namespace) -> int:
@@ -250,6 +270,8 @@ def _agent_run(args: argparse.Namespace) -> int:
         execute_taps=args.execute_taps,
         allow_device_input=args.allow_device_input,
         intent=args.intent,
+        adb_path=args.adb_path,
+        serial=args.serial,
     )
     for line in format_report(summary.validation):
         print(line)

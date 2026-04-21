@@ -33,14 +33,20 @@ def validate(script_path: str | Path) -> ValidationReport:
     return validate_script_file(script_path)
 
 
-def run(script_path: str | Path, execute_taps: bool = False, report_out: str | Path | None = None) -> RunnerReport:
+def run(
+    script_path: str | Path,
+    execute_taps: bool = False,
+    report_out: str | Path | None = None,
+    adb_path: str | None = None,
+    serial: str | None = None,
+) -> RunnerReport:
     validation = validate(script_path)
     if not validation.ok:
         messages = "\n".join(issue.message for issue in validation.errors)
         raise RunnerError(f"Script validation failed:\n{messages}")
 
     try:
-        report = run_script_file(script_path, dry_run_taps=not execute_taps)
+        report = run_script_file(script_path, dry_run_taps=not execute_taps, adb_path=adb_path, serial=serial)
     except RunnerError as exc:
         if report_out is not None and exc.report is not None:
             _write_report(report_out, exc.report.to_dict())

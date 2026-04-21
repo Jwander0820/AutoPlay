@@ -25,6 +25,8 @@ def agent_run_script(
     execute_taps: bool = False,
     allow_device_input: bool = False,
     intent: str = "daily task dry run",
+    adb_path: str | None = None,
+    serial: str | None = None,
 ) -> AgentRunSummary:
     script = Path(script_path)
     root = Path(artifact_root)
@@ -36,7 +38,7 @@ def agent_run_script(
         artifact_root=root,
         audit_path=audit_path,
     )
-    session = AgentSession(policy=policy)
+    session = AgentSession(policy=policy, adb_path=adb_path, serial=serial)
 
     validation = session.validate(script)
     if not validation.ok:

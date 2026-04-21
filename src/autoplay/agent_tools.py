@@ -141,7 +141,7 @@ class AgentSession:
         return self._call(
             "run",
             metadata,
-            lambda: api.run(script_path, execute_taps=will_execute, report_out=report_out),
+            lambda: api.run(script_path, execute_taps=will_execute, report_out=report_out, adb_path=self.adb_path, serial=self.serial),
             consume_step=False,
         )
 

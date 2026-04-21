@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from unittest import mock
 
+from autoplay.adb import AdbResult
 from autoplay.cli import main
 from png_helpers import write_rgba_png
 
@@ -112,6 +113,22 @@ steps:
             self.assertTrue((artifact_root / "reports" / "script-agent-dry-run.json").exists())
             self.assertTrue((artifact_root / "agent" / "script-audit.jsonl").exists())
 
+    def test_screenshot_multiple_devices_prints_serial_hint(self):
+        result = AdbResult(command=["adb", "exec-out", "screencap", "-p"], returncode=1, stderr="error: more than one device/emulator")
+        doctor_report = mock.Mock(lines=["Connected devices: emulator-5554, 127.0.0.1:5555"])
+
+        with (
+            mock.patch("autoplay.cli.api.screenshot", return_value=result),
+            mock.patch("autoplay.cli.api.doctor", return_value=doctor_report),
+            mock.patch("sys.stderr", new_callable=StringIO) as stderr,
+        ):
+            self.assertEqual(main(["screenshot", "--out", "artifacts/manual/screen.png"]), 1)
+
+        output = stderr.getvalue()
+        self.assertIn("more than one device/emulator", output)
+        self.assertIn("--serial emulator-5554", output)
+        self.assertIn("--serial 127.0.0.1:5555", output)
+
     def test_click_map_writes_html_from_existing_screenshot(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -122,7 +139,7 @@ steps:
             with mock.patch("builtins.print"):
                 self.assertEqual(main(["click-map", str(screenshot), "--out", str(html)]), 0)
 
-            self.assertIn("AutoPlay Script Builder", html.read_text(encoding="utf-8"))
+            self.assertIn("AutoPlay 錄製工作台", html.read_text(encoding="utf-8"))
 
     def test_click_map_uses_script_out_download_name(self):
         with tempfile.TemporaryDirectory() as tmp:
