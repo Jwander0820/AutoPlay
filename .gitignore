@@ -8,6 +8,7 @@ build/
 out/
 coverage/
 artifacts/
+scripts/
 
 # Logs
 *.log
