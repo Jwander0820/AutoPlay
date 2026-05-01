@@ -47,6 +47,48 @@ def match_template_file(
     return match_template(source, template, threshold=threshold, tolerance=tolerance, region=region)
 
 
+def crop_png_file(
+    source_path: str | Path,
+    out_path: str | Path,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+) -> Image:
+    source = read_png(source_path)
+    crop = crop_image(source, x=x, y=y, width=width, height=height)
+    write_png(out_path, crop)
+    return crop
+
+
+def crop_image(source: Image, x: int, y: int, width: int, height: int) -> Image:
+    if not all(isinstance(value, int) for value in (x, y, width, height)):
+        raise ImageError("Crop coordinates must be integers.")
+    if x < 0 or y < 0 or width <= 0 or height <= 0:
+        raise ImageError("Crop must use non-negative x/y and positive width/height.")
+    if x + width > source.width or y + height > source.height:
+        raise ImageError("Crop region is outside the source image.")
+    start = x * 4
+    end = (x + width) * 4
+    rows = tuple(source.rows[row_y][start:end] for row_y in range(y, y + height))
+    return Image(width=width, height=height, rows=rows)
+
+
+def write_png(path: str | Path, image: Image) -> None:
+    raw_rows = []
+    for row in image.rows:
+        raw_rows.append(b"\x00" + row)
+    data = b"".join(raw_rows)
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(
+        PNG_SIGNATURE
+        + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", image.width, image.height, 8, 6, 0, 0, 0))
+        + _png_chunk(b"IDAT", zlib.compress(data))
+        + _png_chunk(b"IEND", b"")
+    )
+
+
 def match_template(source: Image, template: Image, threshold: float, tolerance: int = 0, region: Region | None = None) -> MatchResult:
     if template.width > source.width or template.height > source.height:
         return MatchResult(matched=False, score=0.0)
@@ -124,6 +166,11 @@ def _read_chunks(data: bytes) -> dict[bytes, list[bytes]]:
         if chunk_type == b"IEND":
             break
     return chunks
+
+
+def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
+    crc = zlib.crc32(chunk_type + data) & 0xFFFFFFFF
+    return struct.pack(">I", len(data)) + chunk_type + data + struct.pack(">I", crc)
 
 
 def _unfilter_rows(raw: bytes, width: int, height: int, channels: int, stride: int) -> list[bytes]:

@@ -7,6 +7,7 @@ from urllib import request
 from unittest import mock
 
 from autoplay.adb import AdbResult
+from autoplay.image_match import read_png
 from autoplay.recorder_server import RecorderServerConfig, create_recorder_server
 from png_helpers import write_rgba_png
 
@@ -61,6 +62,66 @@ class RecorderServerTest(unittest.TestCase):
 
             self.assertIn('"serial": "emulator-5554"', html)
             self.assertIn("profileToYaml", html)
+
+    def test_served_builder_includes_device_step_capture_endpoint_when_enabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            screenshot = tmp_path / "screen.png"
+            script = tmp_path / "scripts" / "daily.yml"
+            write_rgba_png(screenshot, 1, 1, [(255, 0, 0, 255)])
+            ready = _create_or_skip(
+                self,
+                RecorderServerConfig(script_path=script, screenshot_path=screenshot, port=0, allow_device_input=True),
+            )
+            thread = threading.Thread(target=ready.server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                html = request.urlopen(ready.url, timeout=2).read().decode("utf-8")
+            finally:
+                ready.server.shutdown()
+                ready.server.server_close()
+                thread.join(timeout=2)
+
+            self.assertIn('const stepCaptureUrl = "/api/device-step-capture"', html)
+
+    def test_served_builder_reflects_serial_calibration_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            screenshot = tmp_path / "screen.png"
+            script = tmp_path / "scripts" / "daily.yml"
+            calibration = tmp_path / "artifacts" / "calibration" / "bluestacks-emulator-5554.json"
+            calibration.parent.mkdir(parents=True)
+            calibration.write_text(
+                json.dumps(
+                    {
+                        "serial": "emulator-5554",
+                        "screen_width": 1200,
+                        "screen_height": 2000,
+                        "scroll_vertical_distance": 820,
+                        "scroll_horizontal_distance": 560,
+                        "default_swipe_duration_ms": 450,
+                        "default_drag_duration_ms": 800,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            write_rgba_png(screenshot, 1, 1, [(255, 0, 0, 255)])
+            ready = _create_or_skip(
+                self,
+                RecorderServerConfig(script_path=script, screenshot_path=screenshot, port=0, serial="emulator-5554"),
+            )
+            thread = threading.Thread(target=ready.server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                html = request.urlopen(ready.url, timeout=2).read().decode("utf-8")
+            finally:
+                ready.server.shutdown()
+                ready.server.server_close()
+                thread.join(timeout=2)
+
+            self.assertIn('"loaded": true', html)
+            self.assertIn('"screen_width": 1200', html)
+            self.assertIn('"scroll_vertical_distance": 820', html)
 
     def test_save_reports_validation_errors(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -237,6 +298,152 @@ class RecorderServerTest(unittest.TestCase):
             self.assertEqual(response["steps"][-1]["type"], "screenshot")
             screenshot_api.assert_called_once()
 
+    def test_device_step_capture_executes_swipe_and_returns_next_screenshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            screenshot = tmp_path / "screen.png"
+            script = tmp_path / "scripts" / "daily.yml"
+            write_rgba_png(screenshot, 1, 1, [(255, 0, 0, 255)])
+            ready = _create_or_skip(
+                self,
+                RecorderServerConfig(script_path=script, screenshot_path=screenshot, port=0, allow_device_input=True),
+            )
+            thread = threading.Thread(target=ready.server.serve_forever, daemon=True)
+            thread.start()
+
+            def fake_screenshot(out, adb_path=None, serial=None):
+                write_rgba_png(Path(out), 1, 1, [(0, 0, 255, 255)])
+                return AdbResult(command=["adb", "screencap"], returncode=0)
+
+            try:
+                payload = json.dumps(
+                    {
+                        "step": {
+                            "type": "swipe",
+                            "x1": 10,
+                            "y1": 20,
+                            "x2": 30,
+                            "y2": 40,
+                            "duration_ms": 500,
+                            "label": "open panel",
+                        },
+                        "wait_seconds": 0,
+                    }
+                ).encode("utf-8")
+                capture_request = request.Request(
+                    ready.url + "api/device-step-capture",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with (
+                    mock.patch("autoplay.recorder_server.api.swipe", return_value=AdbResult(command=["adb", "swipe"], returncode=0)) as swipe,
+                    mock.patch("autoplay.recorder_server.api.screenshot", side_effect=fake_screenshot),
+                ):
+                    response = json.loads(request.urlopen(capture_request, timeout=2).read().decode("utf-8"))
+            finally:
+                ready.server.shutdown()
+                ready.server.server_close()
+                thread.join(timeout=2)
+
+            swipe.assert_called_once_with(10, 20, 30, 40, duration_ms=500, adb_path=None, serial=None, execute=True)
+            self.assertTrue(response["ok"])
+            self.assertEqual([step["type"] for step in response["steps"]], ["swipe", "screenshot"])
+
+    def test_device_step_capture_scroll_uses_calibrated_screen_size(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            screenshot = tmp_path / "screen.png"
+            script = tmp_path / "scripts" / "daily.yml"
+            calibration = tmp_path / "artifacts" / "calibration" / "bluestacks-emulator-5554.json"
+            calibration.parent.mkdir(parents=True)
+            calibration.write_text(
+                json.dumps(
+                    {
+                        "serial": "emulator-5554",
+                        "screen_width": 1200,
+                        "screen_height": 2000,
+                        "scroll_vertical_distance": 820,
+                        "scroll_horizontal_distance": 560,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            write_rgba_png(screenshot, 1, 1, [(255, 0, 0, 255)])
+            ready = _create_or_skip(
+                self,
+                RecorderServerConfig(script_path=script, screenshot_path=screenshot, port=0, allow_device_input=True, serial="emulator-5554"),
+            )
+            thread = threading.Thread(target=ready.server.serve_forever, daemon=True)
+            thread.start()
+
+            def fake_screenshot(out, adb_path=None, serial=None):
+                write_rgba_png(Path(out), 1, 1, [(0, 0, 255, 255)])
+                return AdbResult(command=["adb", "screencap"], returncode=0)
+
+            try:
+                payload = json.dumps(
+                    {
+                        "step": {"type": "scroll", "direction": "down", "duration_ms": 400, "label": "scroll list"},
+                        "wait_seconds": 0,
+                    }
+                ).encode("utf-8")
+                capture_request = request.Request(
+                    ready.url + "api/device-step-capture",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with (
+                    mock.patch("autoplay.recorder_server.api.scroll", return_value=AdbResult(command=["adb", "scroll"], returncode=0)) as scroll,
+                    mock.patch("autoplay.recorder_server.api.screenshot", side_effect=fake_screenshot),
+                ):
+                    response = json.loads(request.urlopen(capture_request, timeout=2).read().decode("utf-8"))
+            finally:
+                ready.server.shutdown()
+                ready.server.server_close()
+                thread.join(timeout=2)
+
+            scroll.assert_called_once_with(
+                "down",
+                distance=820,
+                duration_ms=400,
+                adb_path=None,
+                serial="emulator-5554",
+                execute=True,
+                screen_width=1200,
+                screen_height=2000,
+            )
+            self.assertTrue(response["ok"])
+            self.assertEqual(response["steps"][0]["type"], "scroll")
+
+    def test_device_step_capture_rejects_unsupported_step_type(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            screenshot = tmp_path / "screen.png"
+            script = tmp_path / "scripts" / "daily.yml"
+            write_rgba_png(screenshot, 1, 1, [(255, 0, 0, 255)])
+            ready = _create_or_skip(
+                self,
+                RecorderServerConfig(script_path=script, screenshot_path=screenshot, port=0, allow_device_input=True),
+            )
+            thread = threading.Thread(target=ready.server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                payload = json.dumps({"step": {"type": "pinch"}, "wait_seconds": 0}).encode("utf-8")
+                capture_request = request.Request(
+                    ready.url + "api/device-step-capture",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with self.assertRaises(Exception):
+                    request.urlopen(capture_request, timeout=2)
+            finally:
+                ready.server.shutdown()
+                ready.server.server_close()
+                thread.join(timeout=2)
+
     def test_run_endpoint_saves_current_yaml_and_runs_dry_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -290,6 +497,94 @@ class RecorderServerTest(unittest.TestCase):
                 )
                 with self.assertRaises(Exception):
                     request.urlopen(run_request, timeout=2)
+            finally:
+                ready.server.shutdown()
+                ready.server.server_close()
+                thread.join(timeout=2)
+
+    def test_template_endpoint_crops_png_and_returns_checkpoint_step(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            screenshot = tmp_path / "artifacts" / "manual" / "screen.png"
+            template = tmp_path / "artifacts" / "templates" / "button.png"
+            script = tmp_path / "scripts" / "daily.yml"
+            write_rgba_png(
+                screenshot,
+                3,
+                2,
+                [
+                    (255, 0, 0, 255),
+                    (0, 255, 0, 255),
+                    (0, 0, 255, 255),
+                    (255, 255, 255, 255),
+                    (255, 0, 0, 255),
+                    (0, 255, 0, 255),
+                ],
+            )
+            ready = _create_or_skip(self, RecorderServerConfig(script_path=script, screenshot_path=screenshot, port=0))
+            thread = threading.Thread(target=ready.server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                payload = json.dumps(
+                    {
+                        "source": screenshot.as_posix(),
+                        "template": template.as_posix(),
+                        "x": 1,
+                        "y": 0,
+                        "width": 2,
+                        "height": 2,
+                        "threshold": 0.9,
+                    }
+                ).encode("utf-8")
+                template_request = request.Request(
+                    ready.url + "api/template",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                response = json.loads(request.urlopen(template_request, timeout=2).read().decode("utf-8"))
+            finally:
+                ready.server.shutdown()
+                ready.server.server_close()
+                thread.join(timeout=2)
+
+            self.assertTrue(response["ok"])
+            self.assertEqual(response["template_path"], template.as_posix())
+            self.assertEqual(response["steps"][0]["type"], "checkpoint_match")
+            self.assertEqual(response["steps"][0]["threshold"], 0.9)
+            cropped = read_png(template)
+            self.assertEqual((cropped.width, cropped.height), (2, 2))
+            self.assertEqual(cropped.pixel(0, 0), (0, 255, 0, 255))
+
+    def test_template_endpoint_rejects_out_of_bounds_crop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            screenshot = tmp_path / "artifacts" / "manual" / "screen.png"
+            script = tmp_path / "scripts" / "daily.yml"
+            template = tmp_path / "artifacts" / "templates" / "button.png"
+            write_rgba_png(screenshot, 1, 1, [(255, 0, 0, 255)])
+            ready = _create_or_skip(self, RecorderServerConfig(script_path=script, screenshot_path=screenshot, port=0))
+            thread = threading.Thread(target=ready.server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                payload = json.dumps(
+                    {
+                        "source": screenshot.as_posix(),
+                        "template": template.as_posix(),
+                        "x": 0,
+                        "y": 0,
+                        "width": 2,
+                        "height": 1,
+                    }
+                ).encode("utf-8")
+                template_request = request.Request(
+                    ready.url + "api/template",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with self.assertRaises(Exception):
+                    request.urlopen(template_request, timeout=2)
             finally:
                 ready.server.shutdown()
                 ready.server.server_close()

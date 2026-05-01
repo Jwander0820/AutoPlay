@@ -84,6 +84,119 @@ steps:
             self.assertEqual(report["status"], "ok")
             self.assertEqual(report["events"][0]["step_type"], "wait")
 
+    def test_gesture_commands_default_to_dry_run(self):
+        with mock.patch("builtins.print"):
+            self.assertEqual(main(["swipe", "10", "20", "30", "40", "--duration-ms", "500"]), 0)
+            self.assertEqual(main(["drag", "10", "20", "30", "40", "--duration-ms", "900"]), 0)
+            self.assertEqual(main(["scroll", "down", "--distance", "700", "--duration-ms", "400"]), 0)
+            self.assertEqual(main(["back"]), 0)
+
+    def test_scroll_can_use_calibration_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            calibration = artifact_root / "calibration" / "bluestacks-emulator-5554.json"
+            calibration.parent.mkdir(parents=True)
+            calibration.write_text(
+                json.dumps(
+                    {
+                        "serial": "emulator-5554",
+                        "screen_width": 1200,
+                        "screen_height": 2000,
+                        "scroll_vertical_distance": 820,
+                        "scroll_horizontal_distance": 560,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = StringIO()
+            with mock.patch("sys.stdout", stdout):
+                self.assertEqual(
+                    main(["scroll", "down", "--calibrated", "--serial", "emulator-5554", "--artifact-root", str(artifact_root)]),
+                    0,
+                )
+
+            output = stdout.getvalue()
+            self.assertIn("shell input swipe 600 590 600 1410 400", output)
+            self.assertIn("-s emulator-5554", output)
+
+    def test_calibration_write_and_show(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+
+            with mock.patch("builtins.print"):
+                self.assertEqual(
+                    main(
+                        [
+                            "calibration",
+                            "write",
+                            "--serial",
+                            "emulator-5554",
+                            "--artifact-root",
+                            str(artifact_root),
+                            "--screen-width",
+                            "1200",
+                            "--screen-height",
+                            "2000",
+                            "--scroll-vertical-distance",
+                            "820",
+                            "--scroll-horizontal-distance",
+                            "560",
+                        ]
+                    ),
+                    0,
+                )
+
+            path = artifact_root / "calibration" / "bluestacks-emulator-5554.json"
+            self.assertTrue(path.exists())
+            written = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(written["screen_width"], 1200)
+            self.assertEqual(written["scroll_horizontal_distance"], 560)
+
+            stdout = StringIO()
+            with mock.patch("sys.stdout", stdout):
+                self.assertEqual(main(["calibration", "show", "--serial", "emulator-5554", "--artifact-root", str(artifact_root)]), 0)
+
+            output = stdout.getvalue()
+            self.assertIn("Loaded: true", output)
+            self.assertIn("screen: 1200x2000", output)
+
+            json_stdout = StringIO()
+            with mock.patch("sys.stdout", json_stdout):
+                self.assertEqual(main(["calibration", "show", "--json", "--serial", "emulator-5554", "--artifact-root", str(artifact_root)]), 0)
+
+            shown = json.loads(json_stdout.getvalue())
+            self.assertTrue(shown["loaded"])
+            self.assertEqual(shown["screen_width"], 1200)
+
+    def test_calibration_write_rejects_bad_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch("sys.stderr", new_callable=StringIO) as stderr:
+                self.assertEqual(
+                    main(["calibration", "write", "--artifact-root", tmp, "--screen-width", "0"]),
+                    1,
+                )
+
+            self.assertIn("screen_width must be a positive integer", stderr.getvalue())
+
+    def test_calibration_write_can_infer_screen_size_from_screenshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            artifact_root = tmp_path / "artifacts"
+            screenshot = tmp_path / "screen.png"
+            write_rgba_png(screenshot, 3, 2, [(255, 0, 0, 255)] * 6)
+
+            with mock.patch("builtins.print"):
+                self.assertEqual(
+                    main(["calibration", "write", "--serial", "emulator-5554", "--artifact-root", str(artifact_root), "--from-screenshot", str(screenshot)]),
+                    0,
+                )
+
+            path = artifact_root / "calibration" / "bluestacks-emulator-5554.json"
+            written = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(written["screen_width"], 3)
+            self.assertEqual(written["screen_height"], 2)
+
     def test_record_appends_step_from_stdin(self):
         with tempfile.TemporaryDirectory() as tmp:
             script_path = Path(tmp) / "script.yml"
@@ -139,7 +252,10 @@ steps:
             with mock.patch("builtins.print"):
                 self.assertEqual(main(["click-map", str(screenshot), "--out", str(html)]), 0)
 
-            self.assertIn("AutoPlay 錄製工作台", html.read_text(encoding="utf-8"))
+            html_text = html.read_text(encoding="utf-8")
+            self.assertIn("AutoPlay 錄製工作台", html_text)
+            self.assertIn("互動工具", html_text)
+            self.assertIn("快速補步驟與手勢微調", html_text)
 
     def test_click_map_uses_script_out_download_name(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -161,7 +277,7 @@ steps:
             screenshot = tmp_path / "screen.png"
             write_rgba_png(screenshot, 1, 1, [(255, 0, 0, 255)])
 
-            with mock.patch("autoplay.cli.create_recorder_server") as create_server, mock.patch("builtins.print"):
+            with mock.patch("autoplay.cli.create_recorder_server") as create_server, mock.patch("builtins.print") as printer:
                 server = create_server.return_value.server
                 server.serve_forever.side_effect = KeyboardInterrupt()
                 self.assertEqual(main(["record-ui", str(script), "--screenshot", str(screenshot), "--port", "0", "--allow-device-input"]), 0)
@@ -170,6 +286,8 @@ steps:
             config = create_server.call_args.args[0]
             self.assertTrue(config.allow_device_input)
             server.server_close.assert_called_once()
+            printed = "\n".join(str(call.args[0]) for call in printer.call_args_list)
+            self.assertIn("Calibration: defaults", printed)
 
     def test_record_clicks_delegates_to_live_click_recorder(self):
         with mock.patch("autoplay.cli.run_windows_live_click_recorder", return_value=[]) as recorder, mock.patch("builtins.print"):

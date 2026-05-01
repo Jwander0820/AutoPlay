@@ -11,7 +11,7 @@ from .adb import AdbResult
 from .doctor import DoctorReport
 from .image_match import MatchResult
 from .runner import RunnerReport
-from .script import Region, ScriptError, TapStep, load_script
+from .script import BackStep, DragStep, Region, ScriptError, ScrollStep, SwipeStep, TapStep, load_script
 from .validation import ValidationReport
 
 
@@ -117,6 +117,78 @@ class AgentSession:
             consume_step=False,
         )
 
+    def swipe(self, x1: int, y1: int, x2: int, y2: int, label: str, duration_ms: int = 300, execute: bool = False) -> AdbResult:
+        metadata = {"x1": x1, "y1": y1, "x2": x2, "y2": y2, "duration_ms": duration_ms, "label": label, "execute": execute}
+        self._consume_step("swipe", metadata)
+        try:
+            self._assert_safe_text(label, "swipe label")
+        except SafetyError as exc:
+            return self._blocked("swipe", metadata, str(exc))
+        if execute and not self.policy.allow_device_input:
+            return self._blocked("swipe", metadata, "Real device input is blocked by this agent policy.")
+        will_execute = execute and self.policy.allow_device_input
+        metadata["execute"] = will_execute
+        return self._call(
+            "swipe",
+            metadata,
+            lambda: api.swipe(x1, y1, x2, y2, duration_ms=duration_ms, adb_path=self.adb_path, serial=self.serial, execute=will_execute),
+            consume_step=False,
+        )
+
+    def drag(self, x1: int, y1: int, x2: int, y2: int, label: str, duration_ms: int = 700, execute: bool = False) -> AdbResult:
+        metadata = {"x1": x1, "y1": y1, "x2": x2, "y2": y2, "duration_ms": duration_ms, "label": label, "execute": execute}
+        self._consume_step("drag", metadata)
+        try:
+            self._assert_safe_text(label, "drag label")
+        except SafetyError as exc:
+            return self._blocked("drag", metadata, str(exc))
+        if execute and not self.policy.allow_device_input:
+            return self._blocked("drag", metadata, "Real device input is blocked by this agent policy.")
+        will_execute = execute and self.policy.allow_device_input
+        metadata["execute"] = will_execute
+        return self._call(
+            "drag",
+            metadata,
+            lambda: api.drag(x1, y1, x2, y2, duration_ms=duration_ms, adb_path=self.adb_path, serial=self.serial, execute=will_execute),
+            consume_step=False,
+        )
+
+    def scroll(self, direction: str, label: str, distance: int | None = None, duration_ms: int = 400, execute: bool = False) -> AdbResult:
+        metadata = {"direction": direction, "distance": distance, "duration_ms": duration_ms, "label": label, "execute": execute}
+        self._consume_step("scroll", metadata)
+        try:
+            self._assert_safe_text(label, "scroll label")
+        except SafetyError as exc:
+            return self._blocked("scroll", metadata, str(exc))
+        if execute and not self.policy.allow_device_input:
+            return self._blocked("scroll", metadata, "Real device input is blocked by this agent policy.")
+        will_execute = execute and self.policy.allow_device_input
+        metadata["execute"] = will_execute
+        return self._call(
+            "scroll",
+            metadata,
+            lambda: api.scroll(direction, distance=distance, duration_ms=duration_ms, adb_path=self.adb_path, serial=self.serial, execute=will_execute),
+            consume_step=False,
+        )
+
+    def back(self, label: str, execute: bool = False) -> AdbResult:
+        metadata = {"label": label, "execute": execute}
+        self._consume_step("back", metadata)
+        try:
+            self._assert_safe_text(label, "back label")
+        except SafetyError as exc:
+            return self._blocked("back", metadata, str(exc))
+        if execute and not self.policy.allow_device_input:
+            return self._blocked("back", metadata, "Real device input is blocked by this agent policy.")
+        will_execute = execute and self.policy.allow_device_input
+        metadata["execute"] = will_execute
+        return self._call(
+            "back",
+            metadata,
+            lambda: api.back(adb_path=self.adb_path, serial=self.serial, execute=will_execute),
+            consume_step=False,
+        )
+
     def validate(self, script_path: str | Path) -> ValidationReport:
         return self._call("validate", {"script_path": str(script_path)}, lambda: api.validate(script_path))
 
@@ -134,7 +206,7 @@ class AgentSession:
             return self._blocked(
                 "run",
                 metadata,
-                "Real tap execution is blocked by this agent policy.",
+                "Real tap execution and gesture input is blocked by this agent policy.",
             )
         will_execute = execute_taps and self.policy.allow_device_input
         metadata["execute_taps"] = will_execute
@@ -217,6 +289,14 @@ class AgentSession:
         for index, step in enumerate(script.steps, start=1):
             if isinstance(step, TapStep):
                 self._assert_safe_text(step.label, f"tap label at step {index}")
+            if isinstance(step, SwipeStep):
+                self._assert_safe_text(step.label, f"swipe label at step {index}")
+            if isinstance(step, DragStep):
+                self._assert_safe_text(step.label, f"drag label at step {index}")
+            if isinstance(step, ScrollStep):
+                self._assert_safe_text(step.label, f"scroll label at step {index}")
+            if isinstance(step, BackStep):
+                self._assert_safe_text(step.label, f"back label at step {index}")
 
     def _write_audit(self, tool: str, status: str, metadata: dict[str, Any], result: dict[str, Any] | None = None, error: str | None = None) -> None:
         event = {

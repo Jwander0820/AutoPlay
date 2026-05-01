@@ -43,6 +43,27 @@ offline-1 offline
         self.assertTrue(result.dry_run)
         self.assertEqual(result.command, ["adb", "shell", "input", "tap", "10", "20"])
 
+    def test_swipe_dry_run_builds_command(self):
+        client = AdbClient("adb", serial="emulator-5554")
+
+        result = client.swipe(10, 20, 30, 40, 500, dry_run=True)
+
+        self.assertTrue(result.ok)
+        self.assertTrue(result.dry_run)
+        self.assertEqual(
+            result.command,
+            ["adb", "-s", "emulator-5554", "shell", "input", "swipe", "10", "20", "30", "40", "500"],
+        )
+
+    def test_back_dry_run_builds_command(self):
+        client = AdbClient("adb")
+
+        result = client.back(dry_run=True)
+
+        self.assertTrue(result.ok)
+        self.assertTrue(result.dry_run)
+        self.assertEqual(result.command, ["adb", "shell", "input", "keyevent", "BACK"])
+
 
 if __name__ == "__main__":
     unittest.main()

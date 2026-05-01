@@ -6,10 +6,11 @@ from typing import Sequence
 
 from .adb import AdbClient, AdbResult
 from .doctor import DoctorReport, run_doctor
+from .gestures import compile_scroll
 from .image_match import MatchResult, match_template_file
 from .paths import resolve_adb_path
 from .runner import RunnerError, RunnerReport, run_script_file
-from .script import Region, ScriptError
+from .script import MAX_GESTURE_DURATION_MS, MIN_GESTURE_DURATION_MS, Region, ScriptError
 from .validation import ValidationReport, validate_script_file
 
 
@@ -27,6 +28,57 @@ def tap(x: int, y: int, adb_path: str | None = None, serial: str | None = None, 
         raise ScriptError("tap coordinates must be non-negative integers.")
     adb = _adb_client(adb_path=adb_path, serial=serial)
     return adb.tap(x, y, dry_run=not execute)
+
+
+def swipe(
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
+    duration_ms: int = 300,
+    adb_path: str | None = None,
+    serial: str | None = None,
+    execute: bool = False,
+) -> AdbResult:
+    _validate_swipe_args(x1, y1, x2, y2, duration_ms, "swipe")
+    adb = _adb_client(adb_path=adb_path, serial=serial)
+    return adb.swipe(x1, y1, x2, y2, duration_ms, dry_run=not execute)
+
+
+def drag(
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
+    duration_ms: int = 700,
+    adb_path: str | None = None,
+    serial: str | None = None,
+    execute: bool = False,
+) -> AdbResult:
+    _validate_swipe_args(x1, y1, x2, y2, duration_ms, "drag")
+    adb = _adb_client(adb_path=adb_path, serial=serial)
+    return adb.swipe(x1, y1, x2, y2, duration_ms, dry_run=not execute)
+
+
+def scroll(
+    direction: str,
+    distance: int | None = None,
+    duration_ms: int = 400,
+    adb_path: str | None = None,
+    serial: str | None = None,
+    execute: bool = False,
+    screen_width: int = 1080,
+    screen_height: int = 1920,
+) -> AdbResult:
+    x1, y1, x2, y2 = compile_scroll(direction, distance=distance, screen_width=screen_width, screen_height=screen_height)
+    _validate_duration_ms(duration_ms, "scroll")
+    adb = _adb_client(adb_path=adb_path, serial=serial)
+    return adb.swipe(x1, y1, x2, y2, duration_ms, dry_run=not execute)
+
+
+def back(adb_path: str | None = None, serial: str | None = None, execute: bool = False) -> AdbResult:
+    adb = _adb_client(adb_path=adb_path, serial=serial)
+    return adb.back(dry_run=not execute)
 
 
 def validate(script_path: str | Path) -> ValidationReport:
@@ -79,6 +131,21 @@ def match(
 
 def _adb_client(adb_path: str | None = None, serial: str | None = None) -> AdbClient:
     return AdbClient(adb_path=resolve_adb_path(adb_path), serial=serial)
+
+
+def _validate_swipe_args(x1: int, y1: int, x2: int, y2: int, duration_ms: int, gesture_name: str) -> None:
+    if not all(isinstance(value, int) for value in (x1, y1, x2, y2)):
+        raise ScriptError(f"{gesture_name} coordinates must be integers.")
+    if min(x1, y1, x2, y2) < 0:
+        raise ScriptError(f"{gesture_name} coordinates must be non-negative.")
+    _validate_duration_ms(duration_ms, gesture_name)
+
+
+def _validate_duration_ms(duration_ms: int, gesture_name: str) -> None:
+    if not isinstance(duration_ms, int):
+        raise ScriptError(f"{gesture_name} duration_ms must be an integer.")
+    if duration_ms < MIN_GESTURE_DURATION_MS or duration_ms > MAX_GESTURE_DURATION_MS:
+        raise ScriptError(f"{gesture_name} duration_ms must be between {MIN_GESTURE_DURATION_MS} and {MAX_GESTURE_DURATION_MS}.")
 
 
 def _coerce_region(region: Region | Sequence[int] | None) -> Region | None:

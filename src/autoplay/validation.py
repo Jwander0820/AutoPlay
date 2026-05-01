@@ -5,9 +5,13 @@ from pathlib import Path
 
 from .script import (
     AutoplayScript,
+    BackStep,
     CheckpointExistsStep,
     CheckpointMatchStep,
+    DragStep,
     ScreenshotStep,
+    ScrollStep,
+    SwipeStep,
     ScriptError,
     TapStep,
     WaitStep,
@@ -59,6 +63,26 @@ def validate_script(script: AutoplayScript) -> ValidationReport:
         if isinstance(step, TapStep):
             if not step.label:
                 issues.append(ValidationIssue("warning", f"step {index}: tap has no label."))
+            continue
+
+        if isinstance(step, SwipeStep):
+            if not step.label:
+                issues.append(ValidationIssue("warning", f"step {index}: swipe has no label."))
+            continue
+
+        if isinstance(step, DragStep):
+            if not step.label:
+                issues.append(ValidationIssue("warning", f"step {index}: drag has no label."))
+            continue
+
+        if isinstance(step, ScrollStep):
+            if not step.label:
+                issues.append(ValidationIssue("warning", f"step {index}: scroll has no label."))
+            continue
+
+        if isinstance(step, BackStep):
+            if not step.label:
+                issues.append(ValidationIssue("warning", f"step {index}: back has no label."))
             continue
 
         if isinstance(step, ScreenshotStep):

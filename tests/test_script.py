@@ -2,7 +2,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from autoplay.script import CheckpointExistsStep, CheckpointMatchStep, ScreenshotStep, ScriptError, TapStep, WaitStep, load_script
+from autoplay.script import BackStep, CheckpointExistsStep, CheckpointMatchStep, DragStep, ScreenshotStep, ScriptError, ScrollStep, SwipeStep, TapStep, WaitStep, load_script
 
 
 class ScriptTest(unittest.TestCase):
@@ -118,6 +118,61 @@ steps:
 
             with self.assertRaisesRegex(ScriptError, "threshold"):
                 load_script(script_path)
+
+    def test_gesture_steps_parse(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script_path = Path(tmp) / "script.yml"
+            script_path.write_text(
+                """
+steps:
+  - type: swipe
+    x1: 10
+    y1: 20
+    x2: 30
+    y2: 40
+    duration_ms: 500
+    label: scroll list
+  - type: drag
+    x1: 50
+    y1: 60
+    x2: 70
+    y2: 80
+    duration_ms: 900
+    label: move slider
+  - type: scroll
+    direction: down
+    distance: 700
+    duration_ms: 400
+    label: scroll quest list
+  - type: back
+    label: close panel
+""",
+                encoding="utf-8",
+            )
+
+            script = load_script(script_path)
+
+            self.assertIsInstance(script.steps[0], SwipeStep)
+            self.assertIsInstance(script.steps[1], DragStep)
+            self.assertIsInstance(script.steps[2], ScrollStep)
+            self.assertIsInstance(script.steps[3], BackStep)
+            self.assertEqual(script.steps[2].direction, "down")
+
+    def test_gesture_validation_rejects_bad_values(self):
+        cases = [
+            ("swipe", "x1: -1\n    y1: 0\n    x2: 1\n    y2: 1\n    duration_ms: 300", "non-negative"),
+            ("swipe", "x1: 0\n    y1: 0\n    x2: 1\n    y2: 1\n    duration_ms: 10", "duration_ms"),
+            ("scroll", "direction: diagonal", "direction"),
+            ("scroll", "direction: down\n    distance: 0", "distance"),
+        ]
+        for step_type, body, message in cases:
+            with self.subTest(step_type=step_type, body=body):
+                with tempfile.TemporaryDirectory() as tmp:
+                    script_path = Path(tmp) / "script.yml"
+                    script_path.write_text(f"steps:\n  - type: {step_type}\n    {body}\n", encoding="utf-8")
+
+                    with self.assertRaisesRegex(ScriptError, message):
+                        load_script(script_path)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ An AutoPlay YAML script describes repeatable device actions and checkpoints:
 - `checkpoint_match`: confirm a screenshot contains a template image.
 - `wait`: pause for a fixed number of seconds.
 - `tap`: tap a coordinate; it is dry-run unless execution uses `--execute-taps`.
+- `swipe`, `drag`, `scroll`, `back`: record mobile navigation gestures; they are dry-run unless execution uses the explicit real-input flags.
 - `agent-run`: run a script through the AI-facing safety session, producing both a report and an audit log.
 
 ## Folder layout
@@ -48,7 +49,7 @@ For the most convenient flow, start the local recorder UI. It captures or loads 
 py -m autoplay record-ui scripts\my-daily.yml --screenshot artifacts\manual\start.png --capture
 ```
 
-Open the printed localhost URL. Click the screenshot to add tap steps, add waits/checkpoints from the side controls, then press `Save Script`. The UI saves `scripts\my-daily.yml` and shows validation messages.
+Open the printed localhost URL. Pick a tool at the top of the stage, then click or drag directly on the screenshot to add tap, swipe, drag, scroll, or template-crop steps. The side controls remain for waits, checkpoints, fallback coordinate edits, and save/test actions. The UI can also crop a template from the current screenshot and append a `checkpoint_match` step. It saves `scripts\my-daily.yml` and shows validation messages.
 
 For multi-screen flows, use `Capture Latest` after the game changes screens. The recorder saves numbered screenshots such as `start-001.png` and adds screenshot steps to the script.
 
@@ -58,7 +59,17 @@ If you want the recorder to perform a safe tap and refresh automatically, launch
 py -m autoplay record-ui scripts\my-daily.yml --screenshot artifacts\manual\start.png --capture --allow-device-input
 ```
 
-Then enable `Execute click, wait, and capture next screen` in the browser. Each click sends a real tap, waits, captures the next screen, and appends the generated steps. Keep the wait value long enough for animations or loading screens.
+Then enable `Execute click, wait, and capture next screen` in the browser. Each click or supported gesture sends one real device step, waits, captures the next screen, and appends the generated steps. Keep the wait value long enough for animations or loading screens.
+
+When using gestures, check the `手勢校準` status above the screenshot. If a file such as `artifacts\calibration\bluestacks-emulator-5554.json` exists for your selected serial, the recorder uses it for screen size and scroll-distance assumptions. Without a file, the UI keeps the conservative defaults.
+
+Create or inspect the profile with:
+
+```powershell
+py -m autoplay calibration write --serial emulator-5554 --from-screenshot artifacts\manual\start.png --scroll-vertical-distance 760 --scroll-horizontal-distance 520
+py -m autoplay calibration show --serial emulator-5554
+py -m autoplay scroll down --calibrated --serial emulator-5554
+```
 
 If you prefer a standalone HTML file with no local server, generate an offline builder:
 
@@ -66,7 +77,7 @@ If you prefer a standalone HTML file with no local server, generate an offline b
 py -m autoplay click-map artifacts\manual\start.png --capture --out artifacts\manual\start-builder.html --script-out my-daily.yml
 ```
 
-Open `artifacts\manual\start-builder.html` in your browser. Click the screenshot to add tap steps. Use the side controls to add waits, screenshots, `checkpoint_exists`, or `checkpoint_match`, then press `Download Script`. Save or move the downloaded YAML to `scripts\my-daily.yml`.
+Open `artifacts\manual\start-builder.html` in your browser. Pick a tool, then click or drag directly on the screenshot to add taps and gestures. Use the side controls to add waits, screenshots, `checkpoint_exists`, or `checkpoint_match`, then press `Download Script`. Save or move the downloaded YAML to `scripts\my-daily.yml`.
 
 There is also an experimental Windows-only live click recorder:
 
@@ -86,6 +97,8 @@ artifacts\templates\daily-button.png
 ```
 
 Good templates are small and unique. Avoid animated areas, countdown numbers, currency values, or notification badges.
+
+In `record-ui`, use the Template crop controls to drag-select the stable UI element directly on the screenshot. The server writes the cropped PNG under `artifacts/templates/` and appends the matching checkpoint to the script.
 
 ## Step 3: Test the template
 
@@ -119,7 +132,12 @@ Create a script file such as `scripts\my-daily.yml`, either manually or with:
 py -m autoplay record scripts\my-daily.yml
 ```
 
-The recorder appends steps and validates after each append. It never sends tap input.
+The recorder appends steps and validates after each append. It never sends tap or gesture input. It can also author image checks:
+
+```text
+checkpoint_match artifacts/manual/start.png artifacts/templates/daily-button.png
+checkpoint_match artifacts/manual/start.png artifacts/templates/daily-button.png 0.95 0 250 400 500 300
+```
 
 Example YAML:
 
@@ -184,6 +202,8 @@ If anything fails, keep the report JSON and the screenshots. Those become the in
 AutoPlay does not yet make decisions from the game screen by itself. The planned next stage is an agent decision loop that uses screenshots, template matches, and the safety session to choose the next safe step in dry-run/report mode.
 
 AI can help draft and revise YAML from screenshots and reports, but the current runtime is still deterministic: validate, screenshot, checkpoint, wait, and tap. That is intentional for user testing because it keeps each action reviewable.
+
+The immediate next automation step is guided gesture calibration. Current calibration profiles can be written and shown with `py -m autoplay calibration write/show`, but the interactive `calibration guide` workflow is still planned in `docs/specs/0020-guided-gesture-calibration.md`.
 
 Until then, the personalization loop is:
 

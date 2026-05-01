@@ -47,6 +47,38 @@ class AgentToolsTest(unittest.TestCase):
 
             tap.assert_called_once_with(10, 20, adb_path=None, serial=None, execute=True)
 
+    def test_gesture_tools_default_to_dry_run_and_audit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audit = Path(tmp) / "artifacts" / "agent" / "audit.jsonl"
+            session = AgentSession(policy=AgentPolicy(artifact_root=Path(tmp) / "artifacts", audit_path=audit))
+
+            with (
+                mock.patch("autoplay.api.swipe", return_value=AdbResult(command=["adb", "swipe"], returncode=0, dry_run=True)) as swipe,
+                mock.patch("autoplay.api.scroll", return_value=AdbResult(command=["adb", "swipe"], returncode=0, dry_run=True)) as scroll,
+                mock.patch("autoplay.api.back", return_value=AdbResult(command=["adb", "back"], returncode=0, dry_run=True)) as back,
+            ):
+                session.swipe(10, 20, 30, 40, label="swipe list", duration_ms=500)
+                session.scroll("down", label="scroll list", distance=700, duration_ms=400)
+                session.back(label="close panel")
+
+            swipe.assert_called_once_with(10, 20, 30, 40, duration_ms=500, adb_path=None, serial=None, execute=False)
+            scroll.assert_called_once_with("down", distance=700, duration_ms=400, adb_path=None, serial=None, execute=False)
+            back.assert_called_once_with(adb_path=None, serial=None, execute=False)
+            events = _read_audit(audit)
+            self.assertEqual([event["tool"] for event in events], ["swipe", "scroll", "back"])
+
+    def test_real_gesture_requires_policy_opt_in(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audit = Path(tmp) / "artifacts" / "agent" / "audit.jsonl"
+            session = AgentSession(policy=AgentPolicy(artifact_root=Path(tmp) / "artifacts", audit_path=audit))
+
+            with self.assertRaisesRegex(SafetyError, "Real device input"):
+                session.scroll("down", label="scroll list", execute=True)
+
+            event = _read_audit(audit)[0]
+            self.assertEqual(event["tool"], "scroll")
+            self.assertEqual(event["status"], "blocked")
+
     def test_step_budget_blocks_after_limit(self):
         with tempfile.TemporaryDirectory() as tmp:
             audit = Path(tmp) / "artifacts" / "agent" / "audit.jsonl"
@@ -85,6 +117,29 @@ steps:
   - type: tap
     x: 1
     y: 2
+    label: purchase pack
+""",
+                encoding="utf-8",
+            )
+            session = AgentSession(policy=AgentPolicy(artifact_root=tmp_path / "artifacts", audit_path=audit))
+
+            with self.assertRaisesRegex(SafetyError, "blocked term"):
+                session.run(script, report_out=tmp_path / "artifacts" / "reports" / "run.json")
+
+            event = _read_audit(audit)[0]
+            self.assertEqual(event["tool"], "run")
+            self.assertEqual(event["status"], "blocked")
+
+    def test_run_blocks_unsafe_gesture_label(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            audit = tmp_path / "artifacts" / "agent" / "audit.jsonl"
+            script = tmp_path / "script.yml"
+            script.write_text(
+                """
+steps:
+  - type: scroll
+    direction: down
     label: purchase pack
 """,
                 encoding="utf-8",

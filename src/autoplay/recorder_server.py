@@ -12,8 +12,11 @@ from . import api
 from .adb import AdbResult
 from .agent_runner import agent_run_script
 from .agent_tools import SafetyError
+from .calibration import CalibrationProfile, load_calibration_for_serial
 from .click_map import render_builder_html
+from .image_match import ImageError, crop_png_file
 from .runner import RunnerError
+from .script import ScriptError
 from .validation import format_report
 
 
@@ -38,6 +41,76 @@ class RecorderServerReady:
 class RecorderUiCapture:
     config: RecorderServerConfig
     screenshot_result: AdbResult | None = None
+
+
+@dataclass(frozen=True)
+class DeviceCaptureOptions:
+    wait_seconds: float = 1.0
+    auto_wait: bool = False
+    min_wait_seconds: float = 1.0
+    max_wait_seconds: float = 12.0
+    poll_seconds: float = 0.5
+    stable_seconds: float = 1.2
+
+
+@dataclass(frozen=True)
+class RecordedDeviceStep:
+    type: str
+    label: str
+    x: int | None = None
+    y: int | None = None
+    x1: int | None = None
+    y1: int | None = None
+    x2: int | None = None
+    y2: int | None = None
+    direction: str | None = None
+    distance: int | None = None
+    duration_ms: int | None = None
+
+    def to_step_dict(self) -> dict:
+        if self.type == "tap":
+            return {"type": "tap", "x": self.x, "y": self.y, "label": self.label}
+        if self.type in {"swipe", "drag"}:
+            return {
+                "type": self.type,
+                "x1": self.x1,
+                "y1": self.y1,
+                "x2": self.x2,
+                "y2": self.y2,
+                "duration_ms": self.duration_ms,
+                "label": self.label,
+            }
+        if self.type == "scroll":
+            step = {
+                "type": "scroll",
+                "direction": self.direction,
+                "duration_ms": self.duration_ms,
+                "label": self.label,
+            }
+            if self.distance is not None:
+                step["distance"] = self.distance
+            return step
+        if self.type == "back":
+            return {"type": "back", "label": self.label}
+        raise ValueError(f"Unsupported step type: {self.type}")
+
+    def execute(self, adb_path: str | None = None, serial: str | None = None, calibration: CalibrationProfile | None = None) -> AdbResult:
+        if self.type == "tap":
+            return api.tap(self.x, self.y, adb_path=adb_path, serial=serial, execute=True)
+        if self.type == "swipe":
+            return api.swipe(self.x1, self.y1, self.x2, self.y2, duration_ms=self.duration_ms, adb_path=adb_path, serial=serial, execute=True)
+        if self.type == "drag":
+            return api.drag(self.x1, self.y1, self.x2, self.y2, duration_ms=self.duration_ms, adb_path=adb_path, serial=serial, execute=True)
+        if self.type == "scroll":
+            screen_width = calibration.screen_width if calibration is not None else 1080
+            screen_height = calibration.screen_height if calibration is not None else 1920
+            distance = self.distance
+            if distance is None and calibration is not None:
+                distance = calibration.distance_for_direction(self.direction)
+            return api.scroll(self.direction, distance=distance, duration_ms=self.duration_ms, adb_path=adb_path, serial=serial, execute=True, screen_width=screen_width, screen_height=screen_height)
+        if self.type == "back":
+            return api.back(adb_path=adb_path, serial=serial, execute=True)
+        raise ValueError(f"Unsupported step type: {self.type}")
 
 
 MAX_POST_BYTES = 1_000_000
@@ -77,6 +150,7 @@ def create_recorder_server(config: RecorderServerConfig) -> RecorderServerReady:
 
 def _make_handler(config: RecorderServerConfig):
     capture_state = {"index": 0, "current_path": config.screenshot_path}
+    calibration = load_calibration_for_serial(config.serial, artifact_root=_default_artifact_root(config.script_path))
 
     class RecorderHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -91,7 +165,10 @@ def _make_handler(config: RecorderServerConfig):
                     save_url="/api/script",
                     capture_url="/api/capture",
                     tap_capture_url="/api/tap-capture" if config.allow_device_input else None,
+                    step_capture_url="/api/device-step-capture" if config.allow_device_input else None,
                     run_url="/api/run",
+                    template_url="/api/template",
+                    calibration=calibration.to_ui_dict(),
                     allow_device_input=config.allow_device_input,
                     profile_adb_path=config.adb_path,
                     profile_serial=config.serial,
@@ -111,8 +188,14 @@ def _make_handler(config: RecorderServerConfig):
             if self.path == "/api/tap-capture":
                 self._tap_capture()
                 return
+            if self.path == "/api/device-step-capture":
+                self._device_step_capture()
+                return
             if self.path == "/api/run":
                 self._run_script()
+                return
+            if self.path == "/api/template":
+                self._save_template()
                 return
             self._write_json(HTTPStatus.NOT_FOUND, {"ok": False, "messages": ["Not found."]})
 
@@ -152,6 +235,9 @@ def _make_handler(config: RecorderServerConfig):
             self._write_json(HTTPStatus.OK, _screenshot_payload(screenshot_path, steps=[{"type": "screenshot", "out": screenshot_path.as_posix()}]))
 
         def _tap_capture(self) -> None:
+            self._device_step_capture()
+
+        def _device_step_capture(self) -> None:
             if not config.allow_device_input:
                 self._write_json(HTTPStatus.FORBIDDEN, {"ok": False, "messages": ["Device input is not enabled for this recorder."]})
                 return
@@ -159,66 +245,33 @@ def _make_handler(config: RecorderServerConfig):
             if payload is None:
                 return
             try:
-                x = int(payload["x"])
-                y = int(payload["y"])
-                label = str(payload.get("label") or "recorded tap")
-                wait_seconds = float(payload.get("wait_seconds", 1))
-                auto_wait = bool(payload.get("auto_wait", False))
-                min_wait_seconds = float(payload.get("min_wait_seconds", 1))
-                max_wait_seconds = float(payload.get("max_wait_seconds", 12))
-                poll_seconds = float(payload.get("poll_seconds", 0.5))
-                stable_seconds = float(payload.get("stable_seconds", 1.2))
-            except (KeyError, TypeError, ValueError) as exc:
-                self._write_json(HTTPStatus.BAD_REQUEST, {"ok": False, "messages": [f"Invalid tap payload: {exc}"]})
+                step = _coerce_device_step(payload)
+                capture_options = _coerce_capture_options(payload)
+            except (KeyError, TypeError, ValueError, ScriptError) as exc:
+                self._write_json(HTTPStatus.BAD_REQUEST, {"ok": False, "messages": [f"Invalid device step payload: {exc}"]})
                 return
-            if x < 0 or y < 0 or wait_seconds < 0 or min_wait_seconds < 0 or max_wait_seconds < 0 or poll_seconds < 0 or stable_seconds < 0:
-                self._write_json(HTTPStatus.BAD_REQUEST, {"ok": False, "messages": ["Coordinates and wait seconds must be non-negative."]})
+            try:
+                action_result = step.execute(adb_path=config.adb_path, serial=config.serial, calibration=calibration.profile)
+            except (ValueError, ScriptError) as exc:
+                self._write_json(HTTPStatus.BAD_REQUEST, {"ok": False, "messages": [str(exc)]})
                 return
-            if auto_wait and min_wait_seconds > max_wait_seconds:
-                self._write_json(HTTPStatus.BAD_REQUEST, {"ok": False, "messages": ["Minimum wait seconds cannot exceed maximum wait seconds."]})
-                return
-
-            tap_result = api.tap(x, y, adb_path=config.adb_path, serial=config.serial, execute=True)
-            if not tap_result.ok:
+            if not action_result.ok:
                 self._write_json(
                     HTTPStatus.INTERNAL_SERVER_ERROR,
-                    {"ok": False, "messages": [f"tap failed with exit {tap_result.returncode}: {tap_result.stderr}"]},
+                    {"ok": False, "messages": [f"{step.type} failed with exit {action_result.returncode}: {action_result.stderr}"]},
                 )
                 return
-            screenshot_path = _next_capture_path(config.screenshot_path, capture_state)
-            if auto_wait:
-                elapsed_wait, screenshot_result = _capture_until_stable(
-                    current_path=Path(capture_state["current_path"]),
-                    out_path=screenshot_path,
-                    min_wait_seconds=min_wait_seconds,
-                    max_wait_seconds=max_wait_seconds,
-                    poll_seconds=poll_seconds,
-                    stable_seconds=stable_seconds,
-                    adb_path=config.adb_path,
-                    serial=config.serial,
+            try:
+                response = _capture_after_device_step(
+                    step,
+                    config=config,
+                    capture_state=capture_state,
+                    capture_options=capture_options,
                 )
-            else:
-                if wait_seconds:
-                    time.sleep(wait_seconds)
-                screenshot_result = api.screenshot(screenshot_path, adb_path=config.adb_path, serial=config.serial)
-                elapsed_wait = wait_seconds
-            if not screenshot_result.ok:
-                self._write_json(
-                    HTTPStatus.INTERNAL_SERVER_ERROR,
-                    {"ok": False, "messages": [f"screencap failed with exit {screenshot_result.returncode}: {screenshot_result.stderr}"]},
-                )
+            except RunnerError as exc:
+                self._write_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "messages": [str(exc)]})
                 return
-            capture_state["current_path"] = screenshot_path
-
-            steps = [{"type": "tap", "x": x, "y": y, "label": label}]
-            rounded_wait = round(elapsed_wait, 2)
-            if rounded_wait:
-                steps.append({"type": "wait", "seconds": rounded_wait})
-            steps.append({"type": "screenshot", "out": screenshot_path.as_posix()})
-            payload = _screenshot_payload(screenshot_path, steps=steps)
-            payload["wait_seconds"] = rounded_wait
-            payload["auto_wait"] = auto_wait
-            self._write_json(HTTPStatus.OK, payload)
+            self._write_json(HTTPStatus.OK, response)
 
         def _run_script(self) -> None:
             payload = self._read_json_payload()
@@ -254,7 +307,7 @@ def _make_handler(config: RecorderServerConfig):
                 return
 
             messages = format_report(summary.validation)
-            messages.append("Real taps were sent." if not summary.report.dry_run_taps else "Tap steps were dry-run.")
+            messages.append("Real device input was sent." if not summary.report.dry_run_taps else "Tap and gesture steps were dry-run.")
             self._write_json(
                 HTTPStatus.OK,
                 {
@@ -268,8 +321,53 @@ def _make_handler(config: RecorderServerConfig):
                 },
             )
 
+        def _save_template(self) -> None:
+            payload = self._read_json_payload()
+            if payload is None:
+                return
+            try:
+                source = Path(str(payload.get("source") or capture_state["current_path"]))
+                template = Path(str(payload["template"]))
+                x = int(payload["x"])
+                y = int(payload["y"])
+                width = int(payload["width"])
+                height = int(payload["height"])
+                threshold = float(payload.get("threshold", 0.95))
+            except (KeyError, TypeError, ValueError) as exc:
+                self._write_json(HTTPStatus.BAD_REQUEST, {"ok": False, "messages": [f"Invalid template payload: {exc}"]})
+                return
+            if threshold < 0 or threshold > 1:
+                self._write_json(HTTPStatus.BAD_REQUEST, {"ok": False, "messages": ["Threshold must be between 0 and 1."]})
+                return
+            try:
+                _require_template_output_path(template, _default_artifact_root(config.script_path))
+                crop = crop_png_file(source, template, x=x, y=y, width=width, height=height)
+            except (OSError, ImageError, ValueError) as exc:
+                self._write_json(HTTPStatus.BAD_REQUEST, {"ok": False, "messages": [f"Cannot save template: {exc}"]})
+                return
+
+            step = {
+                "type": "checkpoint_match",
+                "source": source.as_posix(),
+                "template": template.as_posix(),
+                "threshold": threshold,
+            }
+            self._write_json(
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "status": "template_saved",
+                    "template_path": template.as_posix(),
+                    "source_path": source.as_posix(),
+                    "width": crop.width,
+                    "height": crop.height,
+                    "steps": [step],
+                    "messages": [f"Saved template {template}."],
+                },
+            )
+
         def _read_json_payload(self) -> dict | None:
-            if self.path not in {"/api/script", "/api/capture", "/api/tap-capture", "/api/run"}:
+            if self.path not in {"/api/script", "/api/capture", "/api/tap-capture", "/api/device-step-capture", "/api/run", "/api/template"}:
                 self._write_json(HTTPStatus.NOT_FOUND, {"ok": False, "messages": ["Not found."]})
                 return None
             length = int(self.headers.get("Content-Length", "0"))
@@ -298,6 +396,108 @@ def _make_handler(config: RecorderServerConfig):
             self._write_text(status, json.dumps(payload, sort_keys=True), "application/json; charset=utf-8")
 
     return RecorderHandler
+
+
+def _coerce_capture_options(payload: dict) -> DeviceCaptureOptions:
+    wait_seconds = float(payload.get("wait_seconds", 1))
+    auto_wait = bool(payload.get("auto_wait", False))
+    min_wait_seconds = float(payload.get("min_wait_seconds", 1))
+    max_wait_seconds = float(payload.get("max_wait_seconds", 12))
+    poll_seconds = float(payload.get("poll_seconds", 0.5))
+    stable_seconds = float(payload.get("stable_seconds", 1.2))
+    if min(wait_seconds, min_wait_seconds, max_wait_seconds, poll_seconds, stable_seconds) < 0:
+        raise ValueError("Wait and poll values must be non-negative.")
+    if auto_wait and min_wait_seconds > max_wait_seconds:
+        raise ValueError("Minimum wait seconds cannot exceed maximum wait seconds.")
+    return DeviceCaptureOptions(
+        wait_seconds=wait_seconds,
+        auto_wait=auto_wait,
+        min_wait_seconds=min_wait_seconds,
+        max_wait_seconds=max_wait_seconds,
+        poll_seconds=poll_seconds,
+        stable_seconds=stable_seconds,
+    )
+
+
+def _coerce_device_step(payload: dict) -> RecordedDeviceStep:
+    raw_step = payload.get("step")
+    if raw_step is None:
+        if "x" not in payload or "y" not in payload:
+            raise KeyError("step")
+        raw_step = {
+            "type": "tap",
+            "x": payload["x"],
+            "y": payload["y"],
+            "label": payload.get("label"),
+        }
+    if not isinstance(raw_step, dict):
+        raise TypeError("step must be an object.")
+    step_type = str(raw_step.get("type") or "tap")
+    label = str(raw_step.get("label") or step_type)
+    if step_type == "tap":
+        return RecordedDeviceStep(type="tap", x=int(raw_step["x"]), y=int(raw_step["y"]), label=label)
+    if step_type in {"swipe", "drag"}:
+        return RecordedDeviceStep(
+            type=step_type,
+            x1=int(raw_step["x1"]),
+            y1=int(raw_step["y1"]),
+            x2=int(raw_step["x2"]),
+            y2=int(raw_step["y2"]),
+            duration_ms=int(raw_step.get("duration_ms", 300 if step_type == "swipe" else 700)),
+            label=label,
+        )
+    if step_type == "scroll":
+        distance = raw_step.get("distance")
+        return RecordedDeviceStep(
+            type="scroll",
+            direction=str(raw_step["direction"]),
+            distance=None if distance in {None, ""} else int(distance),
+            duration_ms=int(raw_step.get("duration_ms", 400)),
+            label=label,
+        )
+    if step_type == "back":
+        return RecordedDeviceStep(type="back", label=label)
+    raise ValueError(f"Unsupported step type: {step_type}")
+
+
+def _capture_after_device_step(
+    step: RecordedDeviceStep,
+    config: RecorderServerConfig,
+    capture_state: dict[str, object],
+    capture_options: DeviceCaptureOptions,
+) -> dict:
+    screenshot_path = _next_capture_path(config.screenshot_path, capture_state)
+    if capture_options.auto_wait:
+        elapsed_wait, screenshot_result = _capture_until_stable(
+            current_path=Path(capture_state["current_path"]),
+            out_path=screenshot_path,
+            min_wait_seconds=capture_options.min_wait_seconds,
+            max_wait_seconds=capture_options.max_wait_seconds,
+            poll_seconds=capture_options.poll_seconds,
+            stable_seconds=capture_options.stable_seconds,
+            adb_path=config.adb_path,
+            serial=config.serial,
+        )
+    else:
+        wait_seconds = capture_options.wait_seconds
+        if wait_seconds:
+            time.sleep(wait_seconds)
+        screenshot_result = api.screenshot(screenshot_path, adb_path=config.adb_path, serial=config.serial)
+        elapsed_wait = wait_seconds
+    if not screenshot_result.ok:
+        raise RunnerError(
+            f"screencap failed with exit {screenshot_result.returncode}: {screenshot_result.stderr}"
+        )
+    capture_state["current_path"] = screenshot_path
+    steps = [step.to_step_dict()]
+    rounded_wait = round(elapsed_wait, 2)
+    if rounded_wait:
+        steps.append({"type": "wait", "seconds": rounded_wait})
+    steps.append({"type": "screenshot", "out": screenshot_path.as_posix()})
+    payload = _screenshot_payload(screenshot_path, steps=steps)
+    payload["wait_seconds"] = rounded_wait
+    payload["auto_wait"] = capture_options.auto_wait
+    return payload
 
 
 def _capture_until_stable(
@@ -350,6 +550,23 @@ def _default_artifact_root(script_path: Path) -> Path:
     if script_path.parent.name == "scripts":
         return script_path.parent.parent / "artifacts"
     return Path("artifacts")
+
+
+def _require_template_output_path(path: Path, artifact_root: Path) -> None:
+    if path.suffix.lower() != ".png":
+        raise ValueError("Template output path must end with .png.")
+    if not path.is_absolute() and path.parts and path.parts[0] == "artifacts":
+        return
+    if not _is_relative_to(path, artifact_root):
+        raise ValueError(f"Template output path must be under {artifact_root}.")
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(root.resolve(strict=False))
+        return True
+    except ValueError:
+        return False
 
 
 def _expand_adb_messages(message: str, config: RecorderServerConfig) -> list[str]:

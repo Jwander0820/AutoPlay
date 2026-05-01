@@ -38,6 +38,38 @@ class ApiTest(unittest.TestCase):
         with self.assertRaisesRegex(ScriptError, "non-negative"):
             api.tap(-1, 20)
 
+    def test_swipe_drag_scroll_back_default_to_dry_run(self):
+        with mock.patch("autoplay.api.resolve_adb_path", return_value="adb"):
+            swipe = api.swipe(10, 20, 30, 40, duration_ms=500)
+            drag = api.drag(50, 60, 70, 80, duration_ms=900)
+            scroll = api.scroll("down", distance=700, duration_ms=400)
+            back = api.back()
+
+        self.assertTrue(swipe.dry_run)
+        self.assertEqual(swipe.command, ["adb", "shell", "input", "swipe", "10", "20", "30", "40", "500"])
+        self.assertTrue(drag.dry_run)
+        self.assertEqual(drag.command, ["adb", "shell", "input", "swipe", "50", "60", "70", "80", "900"])
+        self.assertTrue(scroll.dry_run)
+        self.assertEqual(scroll.command, ["adb", "shell", "input", "swipe", "540", "610", "540", "1310", "400"])
+        self.assertTrue(back.dry_run)
+        self.assertEqual(back.command, ["adb", "shell", "input", "keyevent", "BACK"])
+
+    def test_gestures_reject_unbounded_parameters(self):
+        with self.assertRaisesRegex(ScriptError, "non-negative"):
+            api.swipe(-1, 0, 1, 1)
+        with self.assertRaisesRegex(ScriptError, "duration_ms"):
+            api.drag(0, 0, 1, 1, duration_ms=10)
+        with self.assertRaisesRegex(ScriptError, "direction"):
+            api.scroll("diagonal")
+        with self.assertRaisesRegex(ScriptError, "distance"):
+            api.scroll("down", distance=0)
+
+    def test_scroll_accepts_calibrated_screen_size(self):
+        with mock.patch("autoplay.api.resolve_adb_path", return_value="adb"):
+            result = api.scroll("down", distance=800, duration_ms=400, screen_width=1200, screen_height=2000)
+
+        self.assertEqual(result.command, ["adb", "shell", "input", "swipe", "600", "600", "600", "1400", "400"])
+
     def test_run_validates_before_runner(self):
         with tempfile.TemporaryDirectory() as tmp:
             script_path = Path(tmp) / "script.yml"

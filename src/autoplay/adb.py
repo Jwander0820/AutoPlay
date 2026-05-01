@@ -85,6 +85,20 @@ class AdbClient:
             return AdbResult(command=command, returncode=0, stderr="dry-run: command not executed", dry_run=True)
         return self.run(args)
 
+    def swipe(self, x1: int, y1: int, x2: int, y2: int, duration_ms: int, dry_run: bool = False) -> AdbResult:
+        args = ["shell", "input", "swipe", str(x1), str(y1), str(x2), str(y2), str(duration_ms)]
+        command = self.build_command(args)
+        if dry_run:
+            return AdbResult(command=command, returncode=0, stderr="dry-run: command not executed", dry_run=True)
+        return self.run(args)
+
+    def back(self, dry_run: bool = False) -> AdbResult:
+        args = ["shell", "input", "keyevent", "BACK"]
+        command = self.build_command(args)
+        if dry_run:
+            return AdbResult(command=command, returncode=0, stderr="dry-run: command not executed", dry_run=True)
+        return self.run(args)
+
 
 def parse_device_serials(devices_output: str) -> list[str]:
     serials: list[str] = []

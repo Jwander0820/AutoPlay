@@ -9,8 +9,8 @@ Move AutoPlay from a CLI proof of concept into a user-friendly script creation t
 ## Current state
 
 - BlueStacks ADB control works through `AdbClient`.
-- CLI commands exist for doctor, screenshot, tap, run, validate, and match.
-- YAML DSL supports screenshot, checkpoint_exists, checkpoint_match, wait, and tap.
+- CLI commands exist for doctor, screenshot, tap, swipe, drag, scroll, back, calibration, run, validate, and match.
+- YAML DSL supports screenshot, checkpoint_exists, checkpoint_match, wait, tap, swipe, drag, scroll, and back.
 - Runner validates scripts before execution and writes JSON reports with `--report-out`.
 - Template matching is usable for exact/small-region checks, but full-screen fuzzy matching is intentionally bounded.
 - Core CLI behavior is available through `src/autoplay/api.py` for Python callers and future AI/recorder tools.
@@ -21,11 +21,93 @@ Move AutoPlay from a CLI proof of concept into a user-friendly script creation t
 - `py -m autoplay record-ui <script.yml> --screenshot <screen.png>` starts a local recorder UI that saves YAML directly and validates it.
 - `py -m autoplay record-clicks <script.yml>` experimentally records live Windows clicks inside a BlueStacks window into YAML tap steps.
 - `record-ui` supports continuous capture and an explicit opt-in Tap + Wait + Capture loop for multi-screen flows.
-- `record-ui` has a Traditional Chinese workspace UI with script-only/device modes, manual/auto wait modes, dry-run/real script test buttons, profile serial preservation, and auto wait-until-screen-stable support for tap capture.
+- `record-ui` has a Traditional Chinese workspace UI with script-only/device modes, manual/auto wait modes, direct canvas gesture tools, visible calibration status, dry-run/real script test buttons, profile serial preservation, and auto wait-until-screen-stable support for tap and gesture capture.
+- Mobile gesture primitives are implemented across ADB, API, YAML, validation, runner, CLI, agent tools, guided recorder, and record-ui: `swipe`, `drag`, `scroll`, and `back`.
+
+## Stage checkpoint
+
+The current handoff point is after specs `0014` through `0019`:
+
+- Gesture primitives are implemented across the project and covered by unit tests.
+- `record-ui` can directly author gestures on the screenshot canvas and can execute one tap/gesture with wait-and-capture when launched with `--allow-device-input`.
+- Template cropping can append `checkpoint_match`, so user tests can start moving from coordinate-only scripts toward checkpoint-first flows.
+- Calibration profile support exists, but it is still manual: `calibration write/show`, `scroll --calibrated`, serial-aware profile loading, and Web UI calibration visibility are available.
+- `0020-guided-gesture-calibration.md` is the next draft, not completed behavior.
+
+For the next commit or handoff, keep generated screenshots, calibration outputs, reports, audit logs, and personal scripts local under ignored paths such as `artifacts/` and `scripts/`.
 
 ## Proposed next feature
 
-Continue improving the guided recorder command:
+Build a guided calibration workflow on top of the new serial-aware BlueStacks gesture calibration profile support, then use it to harden recorder gesture behavior and post-gesture verification.
+
+The completed gesture spec is:
+
+```text
+docs/specs/0014-mobile-gestures.md
+```
+
+The next slice should focus on:
+
+1. Real BlueStacks guided calibration for scroll distances and screen dimensions.
+2. User-test template cropping after taps and gestures, especially whether cropped templates are stable enough.
+3. User-test the new gesture + capture loop, especially whether waits and screenshot transitions feel predictable enough for daily recording.
+4. A first bounded decision loop that chooses the next safe scripted step from screenshots and template matches, then stops for review before real device input.
+
+The draft spec for this slice is:
+
+```text
+docs/specs/0020-guided-gesture-calibration.md
+```
+
+### Why this is next
+
+The current recorder can now tap, wait, and author gestures. Real daily tasks still need stronger post-action verification:
+
+- gestures need calibrated distances per emulator profile
+- scroll/swipe flows should create checkpoints after movement
+- scripts should fail early when a gesture lands on an unexpected screen
+- future AI calls need bounded choose-next-step behavior, not unrestricted clicking
+
+Without calibration and checkpoints, gestures are available but still too coordinate-heavy for robust daily automation.
+
+## Recommended next implementation order
+
+1. Add small non-interactive calibration helpers first: distance adjustment, profile draft creation, and notes rendering.
+2. Add `py -m autoplay calibration guide` on top of those helpers, with dry-run previews by default and explicit confirmation before each real scroll.
+3. Cover helper behavior and CLI parser wiring with unit tests that do not require BlueStacks.
+4. Use a real BlueStacks pass to tune vertical/horizontal defaults, then record the result as local artifacts.
+5. Feed those findings back into checkpoint-after-gesture guidance before starting the bounded decision loop.
+
+### Initial gesture semantics
+
+Implemented conservative defaults:
+
+- `swipe`: explicit `x1`, `y1`, `x2`, `y2`, `duration_ms`, optional `label`
+- `drag`: same command shape as swipe, but preserve the step type and label for readability
+- `scroll`: `direction`, optional `distance`, optional `duration_ms`; compile to a screen-relative swipe
+- `back`: Android back key event
+
+Suggested validation bounds:
+
+- coordinates must be non-negative integers
+- duration must be between `50` and `5000` ms
+- scroll direction must be one of `up`, `down`, `left`, `right`
+- real execution remains opt-in
+
+### Recorder UI state
+
+The Web UI stays simple:
+
+- Tap still comes from clicking the screenshot.
+- Swipe, drag, and scroll can be authored directly on the screenshot canvas through a tool selector.
+- Scroll is still available as four direction buttons plus distance/duration fields when users want a quick fallback.
+- Back is a single button that appends a `back` step.
+- In device mode, tap and gestures can execute one step at a time, wait, and capture the next screen.
+- Gestures work with the existing dry-run test and real-test buttons.
+
+## Existing recorder improvement backlog
+
+Continue improving the guided recorder command when it helps the mobile gesture work:
 
 ```powershell
 py -m autoplay record scripts\my-daily.yml
@@ -34,16 +116,16 @@ py -m autoplay record scripts\my-daily.yml
 The recorder currently:
 
 1. Start from a YAML output path.
-2. Offer commands such as `screenshot`, `tap X Y LABEL`, `wait SECONDS`, `checkpoint_exists PATH`, `done`.
+2. Offer commands such as `screenshot`, `tap X Y LABEL`, `swipe`, `drag`, `scroll`, `back`, `wait SECONDS`, `checkpoint_exists PATH`, `checkpoint_match SOURCE TEMPLATE`, `done`.
 3. Append steps to the YAML file after each accepted command.
 4. Validate after each append.
-5. Never send real taps during recording.
+5. Never send real taps or gestures during guided recording.
 
 Future improvements should:
 
-1. Add `checkpoint_match` authoring.
-2. Optionally write a report or draft notes under `artifacts/`.
-3. Improve prompts and recovery for validation errors.
+1. Optionally write a report or draft notes under `artifacts/`.
+2. Improve prompts and recovery for validation errors.
+3. Keep refining direct canvas gesture authoring if user testing still finds the recorder too coordination-heavy.
 
 ## Core API direction
 
@@ -58,6 +140,10 @@ Suggested functions:
 - `doctor(adb_path=None, serial=None) -> DoctorReport`
 - `screenshot(out, adb_path=None, serial=None) -> AdbResult`
 - `tap(x, y, adb_path=None, serial=None, execute=False) -> AdbResult`
+- `swipe(x1, y1, x2, y2, duration_ms=300, adb_path=None, serial=None, execute=False) -> AdbResult`
+- `drag(x1, y1, x2, y2, duration_ms=700, adb_path=None, serial=None, execute=False) -> AdbResult`
+- `scroll(direction, distance=None, duration_ms=400, adb_path=None, serial=None, execute=False) -> AdbResult`
+- `back(adb_path=None, serial=None, execute=False) -> AdbResult`
 - `validate(script_path) -> ValidationReport`
 - `run(script_path, execute_taps=False, report_out=None) -> RunnerReport`
 - `match(source, template, threshold=0.95, tolerance=0, region=None) -> MatchResult`
@@ -67,7 +153,7 @@ AI-facing tools should call this API rather than shelling out to CLI commands.
 ## Safety rules for AI tool use
 
 - Default all device input to dry-run.
-- Require an explicit `execute=True` or equivalent for real taps.
+- Require an explicit `execute=True` or equivalent for real taps and gestures.
 - Require validation before running a YAML script.
 - Store screenshots, templates, and reports under `artifacts/`.
 - Preserve step budgets for any future agent loop.
@@ -99,4 +185,18 @@ AI-facing tools should call this API rather than shelling out to CLI commands.
 
 `0013-recorder-ui-refresh.md` is implemented for the Chinese UI refresh and auto wait handling.
 
-Next, test coordinate calibration on real BlueStacks, add template-cropping support, and build a first decision loop that uses screenshots and template matches to choose the next safe YAML/script step before any real tap execution.
+`0014-mobile-gestures.md` is implemented for mobile gesture primitives across the stack.
+
+`0015-checkpoint-authoring-foundation.md` is implemented for guided recorder `checkpoint_match` authoring and gesture helper cleanup.
+
+`0016-record-ui-template-cropping.md` is implemented for browser template cropping and automatic `checkpoint_match` insertion.
+
+`0017-record-ui-direct-gesture-authoring.md` is implemented for screenshot-first swipe/drag/scroll authoring, visual gesture overlays, and recorder workflow polish.
+
+`0018-gesture-capture-loop.md` is implemented for one-step gesture execution with wait-and-capture in recorder device mode.
+
+`0019-bluestacks-gesture-calibration-profile.md` is implemented for serial-aware calibration profile loading, CLI profile authoring, calibrated scroll execution, and recorder UI calibration visibility.
+
+`0020-guided-gesture-calibration.md` is drafted as the next implementation slice.
+
+Next, implement `calibration guide` so testers can derive profile values from real BlueStacks measurements without editing JSON by hand, then test gesture calibration and template stability on real BlueStacks before building a bounded decision loop that uses screenshots and template matches to choose the next safe YAML/script step.

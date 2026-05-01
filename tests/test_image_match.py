@@ -2,7 +2,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from autoplay.image_match import ImageError, match_template_file, read_png
+from autoplay.image_match import ImageError, crop_png_file, match_template_file, read_png
 from autoplay.script import Region
 from png_helpers import write_rgba_png
 
@@ -43,6 +43,44 @@ class ImageMatchTest(unittest.TestCase):
             self.assertEqual((loaded.width, loaded.height), (3, 3))
             self.assertTrue(match.matched)
             self.assertEqual((match.x, match.y), (1, 1))
+
+    def test_crop_png_file_writes_template(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "source.png"
+            template = tmp_path / "template.png"
+            write_rgba_png(
+                source,
+                3,
+                2,
+                [
+                    RED,
+                    GREEN,
+                    BLUE,
+                    WHITE,
+                    RED,
+                    GREEN,
+                ],
+            )
+
+            crop = crop_png_file(source, template, x=1, y=0, width=2, height=2)
+            written = read_png(template)
+
+            self.assertEqual((crop.width, crop.height), (2, 2))
+            self.assertEqual((written.width, written.height), (2, 2))
+            self.assertEqual(written.pixel(0, 0), GREEN)
+            self.assertEqual(written.pixel(1, 0), BLUE)
+            self.assertEqual(written.pixel(0, 1), RED)
+            self.assertEqual(written.pixel(1, 1), GREEN)
+
+    def test_crop_png_rejects_out_of_bounds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "source.png"
+            write_rgba_png(source, 1, 1, [RED])
+
+            with self.assertRaisesRegex(ImageError, "outside"):
+                crop_png_file(source, tmp_path / "template.png", x=0, y=0, width=2, height=1)
 
     def test_region_limits_search_area(self):
         with tempfile.TemporaryDirectory() as tmp:

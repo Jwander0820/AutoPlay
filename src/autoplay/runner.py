@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from .adb import AdbClient, AdbResult
+from .gestures import compile_scroll, swipe_metadata
 from .image_match import ImageError, match_template_file
 from .paths import resolve_adb_path
-from .script import AutoplayScript, CheckpointExistsStep, CheckpointMatchStep, ScreenshotStep, TapStep, WaitStep, load_script
+from .script import AutoplayScript, BackStep, CheckpointExistsStep, CheckpointMatchStep, DragStep, ScreenshotStep, ScrollStep, SwipeStep, TapStep, WaitStep, load_script
 from .validation import validate_script
 
 
@@ -59,6 +60,7 @@ class RunnerReport:
             "started_at": self.started_at,
             "ended_at": self.ended_at,
             "dry_run_taps": self.dry_run_taps,
+            "dry_run_device_input": self.dry_run_taps,
             "error": self.error,
             "executed": self.executed,
             "events": [event.to_dict() for event in self.events],
@@ -92,6 +94,72 @@ class Runner:
                         status="ok",
                         message=f"tap {step.x},{step.y}",
                         metadata={"x": step.x, "y": step.y, "dry_run": result.dry_run, "label": step.label},
+                    )
+                )
+                continue
+
+            if isinstance(step, SwipeStep):
+                self._run_swipe_event(
+                    report=report,
+                    index=index,
+                    step_type="swipe",
+                    x1=step.x1,
+                    y1=step.y1,
+                    x2=step.x2,
+                    y2=step.y2,
+                    duration_ms=step.duration_ms,
+                    label=step.label,
+                    executed=f"{index}: swipe {step.x1},{step.y1} -> {step.x2},{step.y2}",
+                    message=f"swipe {step.x1},{step.y1} -> {step.x2},{step.y2}",
+                )
+                continue
+
+            if isinstance(step, DragStep):
+                self._run_swipe_event(
+                    report=report,
+                    index=index,
+                    step_type="drag",
+                    x1=step.x1,
+                    y1=step.y1,
+                    x2=step.x2,
+                    y2=step.y2,
+                    duration_ms=step.duration_ms,
+                    label=step.label,
+                    executed=f"{index}: drag {step.x1},{step.y1} -> {step.x2},{step.y2}",
+                    message=f"drag {step.x1},{step.y1} -> {step.x2},{step.y2}",
+                )
+                continue
+
+            if isinstance(step, ScrollStep):
+                x1, y1, x2, y2 = compile_scroll(step.direction, distance=step.distance)
+                self._run_swipe_event(
+                    report=report,
+                    index=index,
+                    step_type="scroll",
+                    x1=x1,
+                    y1=y1,
+                    x2=x2,
+                    y2=y2,
+                    duration_ms=step.duration_ms,
+                    label=step.label,
+                    executed=f"{index}: scroll {step.direction}",
+                    message=f"scroll {step.direction}",
+                    extra_metadata={"direction": step.direction, "distance": step.distance},
+                )
+                continue
+
+            if isinstance(step, BackStep):
+                result = self.adb.back(dry_run=self.dry_run_taps)
+                report.results.append(result)
+                report.executed.append(f"{index}: back")
+                _raise_on_failed_adb(result, f"back step {index}", report, index, "back")
+                report.events.append(
+                    RunEvent(
+                        index=index,
+                        step_type="back",
+                        status="ok",
+                        message="back",
+                        metadata={"dry_run": result.dry_run, "label": step.label},
                     )
                 )
                 continue
@@ -164,6 +232,30 @@ class Runner:
             _fail(report, index, "unknown", f"Unsupported step at index {index}: {step!r}")
         report.finish()
         return report
+
+    def _run_swipe_event(
+        self,
+        report: RunnerReport,
+        index: int,
+        step_type: str,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+        duration_ms: int,
+        label: str | None,
+        executed: str,
+        message: str,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> None:
+        result = self.adb.swipe(x1, y1, x2, y2, duration_ms, dry_run=self.dry_run_taps)
+        report.results.append(result)
+        report.executed.append(executed)
+        _raise_on_failed_adb(result, f"{step_type} step {index}", report, index, step_type)
+        metadata = swipe_metadata(x1, y1, x2, y2, duration_ms, result.dry_run, label)
+        if extra_metadata:
+            metadata.update(extra_metadata)
+        report.events.append(RunEvent(index=index, step_type=step_type, status="ok", message=message, metadata=metadata))
 
 
 def run_script_file(

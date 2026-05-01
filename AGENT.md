@@ -34,21 +34,30 @@ Use the project skill at `skills/autoplay/SKILL.md` when work involves AutoPlay-
 - Treat every user test failure as input for the next spec.
 - Prefer adding diagnostics before adding more automation surface.
 - Keep the project runnable without BlueStacks for unit tests.
-- Preserve safety defaults: validation first, dry-run taps by default, explicit flags for device input.
+- Preserve safety defaults: validation first, dry-run device input by default, explicit flags for taps and gestures.
 
 ## Current automation foundation
 
 - BlueStacks ADB control is available through `AdbClient`.
-- CLI commands exist for `doctor`, `screenshot`, `tap`, `run`, `validate`, `match`, `record`, `agent-run`, `click-map`, `record-ui`, and `record-clicks`.
-- YAML DSL supports screenshots, waits, taps, checkpoint existence checks, and template match checkpoints.
+- CLI commands exist for `doctor`, `screenshot`, `tap`, `swipe`, `drag`, `scroll`, `back`, `calibration`, `run`, `validate`, `match`, `record`, `agent-run`, `click-map`, `record-ui`, and `record-clicks`.
+- YAML DSL supports screenshots, waits, taps, mobile gestures, checkpoint existence checks, and template match checkpoints.
 - Core CLI behavior is API-ized in `src/autoplay/api.py` so recorders, AI tools, and future decision loops can call Python functions instead of shelling out.
 - Guided script creation is available through `src/autoplay/recorder.py` and `py -m autoplay record <script.yml>`.
 - Screenshot-based coordinate collection is available through `py -m autoplay click-map <screenshot.png> --out <page.html>`.
 - Browser-based script recording is available through `py -m autoplay record-ui <script.yml> --screenshot <screen.png>`.
-- The recorder UI is a Traditional Chinese workspace with repeated capture, script-only/device modes, manual/auto wait modes, dry-run/real script test buttons, profile serial preservation, and an explicit opt-in tap/capture flow for multi-screen scripts.
+- The recorder UI is a Traditional Chinese workspace with repeated capture, script-only/device modes, manual/auto wait modes, direct-manipulation gesture tools on the screenshot canvas, dry-run/real script test buttons, profile serial preservation, and an explicit opt-in tap/capture flow for multi-screen scripts.
 - Experimental Windows live-click recording is available through `py -m autoplay record-clicks <script.yml>` for BlueStacks windows.
 - AI-facing automation tools are wrapped by `src/autoplay/agent_tools.py`, which enforces dry-run defaults, step budgets, audit logs, artifact-root checks, and blocked unsafe intents.
 - `py -m autoplay agent-run <script.yml>` is the first user-testable AI automation rail for running validated scripts through the safety wrapper.
+
+## Current stage checkpoint
+
+- This stage completed the gesture-authoring foundation: mobile gestures are supported across the DSL, validation, runner, CLI, API, agent tools, guided recorder, `click-map`, and `record-ui`.
+- `record-ui` can now author tap, swipe, drag, scroll, back, wait, screenshot, and `checkpoint_match` steps from the screenshot workspace.
+- Device-mode recorder flows can execute one tap or supported gesture, wait manually or until screen stability, capture the next screenshot, and append the reviewable YAML sequence.
+- Serial-aware calibration profiles exist through `calibration write/show`, `scroll --calibrated`, recorder profile loading, and visible calibration status in the Web UI.
+- `docs/specs/0020-guided-gesture-calibration.md` is still a draft. Do not describe `calibration guide` as implemented until the CLI workflow, profile/note writing, and tests land.
+- The next automation boundary is calibration and checkpoint reliability, not unrestricted screen-solving.
 
 ## Implemented specs
 
@@ -61,12 +70,29 @@ Use the project skill at `skills/autoplay/SKILL.md` when work involves AutoPlay-
 - `docs/specs/0011-live-click-recorder.md`: experimental Windows live-click capture for BlueStacks.
 - `docs/specs/0012-continuous-recorder-ui.md`: repeated capture and tap/wait/capture flows.
 - `docs/specs/0013-recorder-ui-refresh.md`: Chinese UI refresh and auto wait handling.
+- `docs/specs/0014-mobile-gestures.md`: mobile gesture primitives across ADB, API, YAML, runner, CLI, agent tools, and recorder UI.
+- `docs/specs/0015-checkpoint-authoring-foundation.md`: guided recorder checkpoint_match authoring and gesture helper cleanup.
+- `docs/specs/0016-record-ui-template-cropping.md`: browser template cropping and checkpoint_match insertion.
+- `docs/specs/0017-record-ui-direct-gesture-authoring.md`: direct screenshot gesture authoring and recorder UI workflow polish.
+- `docs/specs/0018-gesture-capture-loop.md`: execute-and-capture recorder flow for gestures in device mode.
+- `docs/specs/0019-bluestacks-gesture-calibration-profile.md`: serial-aware gesture calibration profile loading, CLI profile authoring, and recorder UI calibration visibility.
+
+## Draft specs
+
+- `docs/specs/0020-guided-gesture-calibration.md`: next CLI-first workflow for deriving profile values from real BlueStacks tester feedback.
 
 ## Next stage direction
 
+- Calibrate mobile gestures on real BlueStacks profiles, especially scroll distance and screen coordinate assumptions.
+- Continue from `0020-guided-gesture-calibration.md` when turning calibration user-test notes into a guided calibration flow that can derive values from real BlueStacks measurements.
+- Keep the first `calibration guide` implementation CLI-first and bounded: dry-run preview by default, at most one confirmed real scroll per prompt, profile JSON saved only after final confirmation, and local notes written under `artifacts/calibration/`.
+- Add checkpoint-first user testing around taps and gestures so flows verify screen state after movement.
+- Guided recorder and record-ui can already author `checkpoint_match`; the next work is calibration and decision-loop planning.
+- Gesture execute-and-capture is available in device mode; the next work is calibrating it on real BlueStacks screens and tightening post-gesture verification.
+- Prefer small typed helpers around recorder payload normalization before adding more recorder endpoints or UI state branches.
 - Use real BlueStacks user testing to calibrate screenshot dimensions, click coordinates, and window/client-area mapping.
 - Improve script authoring from "record taps" into "record intent": add template-cropping, checkpoint creation, and screen-change detection after actions.
-- Build a first bounded decision loop that can inspect a screenshot, run template matches, choose the next safe scripted step, and stop for review before any real tap execution.
+- Build a first bounded decision loop that can inspect a screenshot, run template matches, choose the next safe scripted step, and stop for review before any real tap or gesture execution.
 - Keep AI-facing APIs behind the same safety model: dry-run by default, explicit execution flags, validation before device input, step budgets, audit logs, and JSON reports for every run.
 - Do not give AI an unrestricted loop that freely clicks the device. Prefer bounded tool calls, reviewable plans/scripts, and explicit user opt-in for real device input.
 

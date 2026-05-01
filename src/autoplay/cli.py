@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from . import api
 from .agent_runner import agent_run_script
 from .agent_tools import SafetyError
+from .calibration import CalibrationProfile, calibration_path_for_serial, load_calibration_for_serial, save_calibration_profile
 from .click_map import capture_click_map, write_click_map
-from .image_match import ImageError
+from .image_match import ImageError, read_png
 from .live_click_recorder import LiveClickRecorderError, run_windows_live_click_recorder
 from .recorder_server import capture_recorder_screenshot, create_recorder_server
 from .recorder import record_script
@@ -48,9 +50,69 @@ def build_parser() -> argparse.ArgumentParser:
     tap.add_argument("--serial", help="ADB serial to target.")
     tap.set_defaults(func=_tap)
 
+    swipe = subparsers.add_parser("swipe", help="Swipe through ADB; dry-run unless --yes is passed.")
+    swipe.add_argument("x1", type=int)
+    swipe.add_argument("y1", type=int)
+    swipe.add_argument("x2", type=int)
+    swipe.add_argument("y2", type=int)
+    swipe.add_argument("--duration-ms", type=int, default=300, help="Swipe duration in milliseconds.")
+    swipe.add_argument("--yes", action="store_true", help="Actually send the swipe.")
+    swipe.add_argument("--adb-path", help="Override HD-Adb.exe path.")
+    swipe.add_argument("--serial", help="ADB serial to target.")
+    swipe.set_defaults(func=_swipe)
+
+    drag = subparsers.add_parser("drag", help="Drag through ADB; dry-run unless --yes is passed.")
+    drag.add_argument("x1", type=int)
+    drag.add_argument("y1", type=int)
+    drag.add_argument("x2", type=int)
+    drag.add_argument("y2", type=int)
+    drag.add_argument("--duration-ms", type=int, default=700, help="Drag duration in milliseconds.")
+    drag.add_argument("--yes", action="store_true", help="Actually send the drag.")
+    drag.add_argument("--adb-path", help="Override HD-Adb.exe path.")
+    drag.add_argument("--serial", help="ADB serial to target.")
+    drag.set_defaults(func=_drag)
+
+    scroll = subparsers.add_parser("scroll", help="Scroll through ADB; dry-run unless --yes is passed.")
+    scroll.add_argument("direction", choices=["up", "down", "left", "right"])
+    scroll.add_argument("--distance", type=int, help="Scroll distance in pixels. Defaults to 700.")
+    scroll.add_argument("--duration-ms", type=int, default=400, help="Scroll duration in milliseconds.")
+    scroll.add_argument("--yes", action="store_true", help="Actually send the scroll.")
+    scroll.add_argument("--adb-path", help="Override HD-Adb.exe path.")
+    scroll.add_argument("--serial", help="ADB serial to target.")
+    scroll.add_argument("--calibrated", action="store_true", help="Use the serial calibration profile for distance and screen size.")
+    scroll.add_argument("--artifact-root", default="artifacts", help="Root containing calibration profiles when --calibrated is used.")
+    scroll.set_defaults(func=_scroll)
+
+    back = subparsers.add_parser("back", help="Send Android back through ADB; dry-run unless --yes is passed.")
+    back.add_argument("--yes", action="store_true", help="Actually send the back keyevent.")
+    back.add_argument("--adb-path", help="Override HD-Adb.exe path.")
+    back.add_argument("--serial", help="ADB serial to target.")
+    back.set_defaults(func=_back)
+
+    calibration = subparsers.add_parser("calibration", help="Create or inspect local gesture calibration profiles.")
+    calibration_subparsers = calibration.add_subparsers(dest="calibration_command", required=True)
+    calibration_show = calibration_subparsers.add_parser("show", help="Show the calibration profile that record-ui would use.")
+    calibration_show.add_argument("--serial", help="ADB serial used to select the calibration profile.")
+    calibration_show.add_argument("--artifact-root", default="artifacts", help="Root containing calibration profiles.")
+    calibration_show.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    calibration_show.set_defaults(func=_calibration_show)
+
+    calibration_write = calibration_subparsers.add_parser("write", help="Write a gesture calibration profile JSON file.")
+    calibration_write.add_argument("--serial", help="ADB serial for this calibration profile.")
+    calibration_write.add_argument("--artifact-root", default="artifacts", help="Root for the default calibration profile path.")
+    calibration_write.add_argument("--out", help="Explicit output JSON path. Defaults under artifact root.")
+    calibration_write.add_argument("--screen-width", type=int, default=1080)
+    calibration_write.add_argument("--screen-height", type=int, default=1920)
+    calibration_write.add_argument("--from-screenshot", help="Use this PNG screenshot to fill screen width and height.")
+    calibration_write.add_argument("--scroll-vertical-distance", type=int, default=700)
+    calibration_write.add_argument("--scroll-horizontal-distance", type=int, default=700)
+    calibration_write.add_argument("--default-swipe-duration-ms", type=int, default=400)
+    calibration_write.add_argument("--default-drag-duration-ms", type=int, default=700)
+    calibration_write.set_defaults(func=_calibration_write)
+
     run = subparsers.add_parser("run", help="Run an AutoPlay YAML script.")
     run.add_argument("script", help="Path to YAML script.")
-    run.add_argument("--execute-taps", action="store_true", help="Actually send tap steps; otherwise taps are dry-run.")
+    run.add_argument("--execute-taps", action="store_true", help="Actually send tap and gesture steps; otherwise device input is dry-run.")
     run.add_argument("--report-out", help="Write a JSON run report, including partial progress on runner failures.")
     run.set_defaults(func=_run)
 
@@ -96,7 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
     agent_run.add_argument("--audit-out", help="Write the agent audit JSONL here. Defaults under artifact root.")
     agent_run.add_argument("--step-budget", type=int, default=20, help="Maximum number of agent tool calls.")
     agent_run.add_argument("--intent", default="daily task dry run", help="Short safe intent label for audit logs.")
-    agent_run.add_argument("--execute-taps", action="store_true", help="Request real tap execution.")
+    agent_run.add_argument("--execute-taps", action="store_true", help="Request real tap and gesture execution.")
     agent_run.add_argument("--allow-device-input", action="store_true", help="Allow real device input when --execute-taps is also set.")
     agent_run.add_argument("--adb-path", help="Override HD-Adb.exe path for script execution.")
     agent_run.add_argument("--serial", help="ADB serial to target during script execution.")
@@ -160,12 +222,99 @@ def _tap(args: argparse.Namespace) -> int:
     return 0
 
 
+def _swipe(args: argparse.Namespace) -> int:
+    result = api.swipe(args.x1, args.y1, args.x2, args.y2, duration_ms=args.duration_ms, adb_path=args.adb_path, serial=args.serial, execute=args.yes)
+    return _print_device_input_result("swipe", "Swipe sent.", "Dry-run only. Pass --yes to send the swipe.", result, args)
+
+
+def _drag(args: argparse.Namespace) -> int:
+    result = api.drag(args.x1, args.y1, args.x2, args.y2, duration_ms=args.duration_ms, adb_path=args.adb_path, serial=args.serial, execute=args.yes)
+    return _print_device_input_result("drag", "Drag sent.", "Dry-run only. Pass --yes to send the drag.", result, args)
+
+
+def _scroll(args: argparse.Namespace) -> int:
+    distance = args.distance
+    screen_width = 1080
+    screen_height = 1920
+    if args.calibrated:
+        calibration = load_calibration_for_serial(args.serial, artifact_root=args.artifact_root)
+        profile = calibration.profile
+        if distance is None:
+            distance = profile.distance_for_direction(args.direction)
+        screen_width = profile.screen_width
+        screen_height = profile.screen_height
+        for warning in calibration.warnings:
+            print(f"WARNING: {warning}", file=sys.stderr)
+    result = api.scroll(
+        args.direction,
+        distance=distance,
+        duration_ms=args.duration_ms,
+        adb_path=args.adb_path,
+        serial=args.serial,
+        execute=args.yes,
+        screen_width=screen_width,
+        screen_height=screen_height,
+    )
+    return _print_device_input_result("scroll", "Scroll sent.", "Dry-run only. Pass --yes to send the scroll.", result, args)
+
+
+def _back(args: argparse.Namespace) -> int:
+    result = api.back(adb_path=args.adb_path, serial=args.serial, execute=args.yes)
+    return _print_device_input_result("back", "Back sent.", "Dry-run only. Pass --yes to send the back keyevent.", result, args)
+
+
+def _calibration_show(args: argparse.Namespace) -> int:
+    result = load_calibration_for_serial(args.serial, artifact_root=args.artifact_root)
+    if args.json:
+        print(json.dumps(result.to_ui_dict(), indent=2, sort_keys=True))
+        for warning in result.warnings:
+            print(f"WARNING: {warning}", file=sys.stderr)
+        return 1 if result.warnings else 0
+    print(f"Calibration path: {result.path}")
+    print(f"Loaded: {str(result.loaded).lower()}")
+    profile = result.profile
+    print(f"serial: {profile.serial or ''}")
+    print(f"screen: {profile.screen_width}x{profile.screen_height}")
+    print(f"scroll_vertical_distance: {profile.scroll_vertical_distance}")
+    print(f"scroll_horizontal_distance: {profile.scroll_horizontal_distance}")
+    print(f"default_swipe_duration_ms: {profile.default_swipe_duration_ms}")
+    print(f"default_drag_duration_ms: {profile.default_drag_duration_ms}")
+    for warning in result.warnings:
+        print(f"WARNING: {warning}", file=sys.stderr)
+    return 1 if result.warnings else 0
+
+
+def _calibration_write(args: argparse.Namespace) -> int:
+    screen_width = args.screen_width
+    screen_height = args.screen_height
+    if args.from_screenshot:
+        screenshot = read_png(args.from_screenshot)
+        screen_width = screenshot.width
+        screen_height = screenshot.height
+    profile = CalibrationProfile(
+        serial=args.serial,
+        screen_width=screen_width,
+        screen_height=screen_height,
+        scroll_vertical_distance=args.scroll_vertical_distance,
+        scroll_horizontal_distance=args.scroll_horizontal_distance,
+        default_swipe_duration_ms=args.default_swipe_duration_ms,
+        default_drag_duration_ms=args.default_drag_duration_ms,
+    )
+    out = args.out or calibration_path_for_serial(args.artifact_root, args.serial)
+    path = save_calibration_profile(profile, out)
+    print(f"Wrote calibration: {path}")
+    print(f"screen: {profile.screen_width}x{profile.screen_height}")
+    print(f"scroll_vertical_distance: {profile.scroll_vertical_distance}")
+    print(f"scroll_horizontal_distance: {profile.scroll_horizontal_distance}")
+    return 0
+
+
 def _run(args: argparse.Namespace) -> int:
     report = api.run(args.script, execute_taps=args.execute_taps, report_out=args.report_out)
     for line in report.executed:
         print(line)
     if not args.execute_taps:
-        print("Tap steps were dry-run. Pass --execute-taps to send them.")
+        print("Tap and gesture steps were dry-run. Pass --execute-taps to send them.")
     return 0
 
 
@@ -214,8 +363,13 @@ def _record_ui(args: argparse.Namespace) -> int:
     print(f"Recorder UI: {ready.url}")
     print(f"Script: {capture.config.script_path}")
     print(f"Screenshot: {capture.config.screenshot_path}")
+    calibration = load_calibration_for_serial(capture.config.serial, artifact_root=_default_artifact_root(capture.config.script_path))
+    if calibration.loaded:
+        print(f"Calibration: {calibration.path}")
+    else:
+        print(f"Calibration: defaults ({calibration.path})")
     if capture.config.allow_device_input:
-        print("Device input is enabled for Tap + Capture.")
+        print("Device input is enabled for tap/gesture capture.")
     else:
         print("Device input is disabled; use Capture Latest after manual actions.")
     print("Press Ctrl+C to stop.")
@@ -226,6 +380,13 @@ def _record_ui(args: argparse.Namespace) -> int:
     finally:
         ready.server.server_close()
     return 0
+
+
+def _default_artifact_root(script_path) -> str:
+    script_parent = getattr(script_path, "parent", None)
+    if script_parent is not None and script_parent.name == "scripts":
+        return str(script_parent.parent / "artifacts")
+    return "artifacts"
 
 
 def _print_adb_failure(context: str, result, adb_path: str | None = None, serial: str | None = None) -> None:
@@ -244,6 +405,18 @@ def _print_adb_failure(context: str, result, adb_path: str | None = None, serial
         print(f"Example: add --serial {serials[0]} to your command.", file=sys.stderr)
     else:
         print("ADB found multiple devices. Run `py -m autoplay doctor` and rerun with the correct --serial value.", file=sys.stderr)
+
+
+def _print_device_input_result(context: str, success_message: str, dry_run_message: str, result, args: argparse.Namespace) -> int:
+    print(" ".join(result.command))
+    if result.dry_run:
+        print(dry_run_message)
+        return 0
+    if not result.ok:
+        _print_adb_failure(context, result, adb_path=args.adb_path, serial=args.serial)
+        return 1
+    print(success_message)
+    return 0
 
 
 def _record_clicks(args: argparse.Namespace) -> int:
@@ -278,9 +451,9 @@ def _agent_run(args: argparse.Namespace) -> int:
     for line in summary.report.executed:
         print(line)
     if not summary.report.dry_run_taps:
-        print("Agent run sent real tap steps.")
+        print("Agent run sent real tap and gesture steps.")
     else:
-        print("Agent run kept tap steps dry-run.")
+        print("Agent run kept tap and gesture steps dry-run.")
     print(f"Report: {summary.report_path}")
     print(f"Audit: {summary.audit_path}")
     return 0

@@ -4,21 +4,37 @@ import unittest
 
 from autoplay.adb import AdbResult
 from autoplay.runner import Runner, RunnerError
-from autoplay.script import AutoplayScript, CheckpointExistsStep, CheckpointMatchStep, ScreenshotStep, ScriptProfile, TapStep
+from autoplay.script import AutoplayScript, BackStep, CheckpointExistsStep, CheckpointMatchStep, DragStep, ScreenshotStep, ScriptProfile, ScrollStep, SwipeStep, TapStep
 from png_helpers import write_rgba_png
 
 
 class FakeAdb:
-    def __init__(self, fail_screenshot: bool = False, fail_tap: bool = False):
+    def __init__(self, fail_screenshot: bool = False, fail_tap: bool = False, fail_swipe: bool = False, fail_back: bool = False):
         self.fail_screenshot = fail_screenshot
         self.fail_tap = fail_tap
+        self.fail_swipe = fail_swipe
+        self.fail_back = fail_back
         self.taps = []
+        self.swipes = []
+        self.backs = []
 
     def tap(self, x, y, dry_run=False):
         self.taps.append((x, y, dry_run))
         if self.fail_tap:
             return AdbResult(command=["adb", "tap"], returncode=1, stderr="tap failed")
         return AdbResult(command=["adb", "tap"], returncode=0, dry_run=dry_run)
+
+    def swipe(self, x1, y1, x2, y2, duration_ms, dry_run=False):
+        self.swipes.append((x1, y1, x2, y2, duration_ms, dry_run))
+        if self.fail_swipe:
+            return AdbResult(command=["adb", "swipe"], returncode=1, stderr="swipe failed")
+        return AdbResult(command=["adb", "swipe"], returncode=0, dry_run=dry_run)
+
+    def back(self, dry_run=False):
+        self.backs.append(dry_run)
+        if self.fail_back:
+            return AdbResult(command=["adb", "back"], returncode=1, stderr="back failed")
+        return AdbResult(command=["adb", "back"], returncode=0, dry_run=dry_run)
 
     def screencap(self, out_path: Path):
         if self.fail_screenshot:
@@ -48,6 +64,30 @@ class RunnerTest(unittest.TestCase):
 
             self.assertEqual(fake_adb.taps, [(10, 20, True)])
             self.assertEqual(report.executed[-1], "3: tap 10,20")
+
+    def test_runner_gestures_dry_run_and_report_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            script = AutoplayScript(
+                profile=ScriptProfile(),
+                source_path=tmp_path / "script.yml",
+                steps=[
+                    SwipeStep(x1=10, y1=20, x2=30, y2=40, duration_ms=500, label="swipe list"),
+                    DragStep(x1=50, y1=60, x2=70, y2=80, duration_ms=900, label="drag slider"),
+                    ScrollStep(direction="down", distance=700, duration_ms=400, label="scroll list"),
+                    BackStep(label="close panel"),
+                ],
+            )
+            fake_adb = FakeAdb()
+
+            report = Runner(fake_adb, dry_run_taps=True).run_script(script)
+
+            self.assertEqual(fake_adb.swipes[0], (10, 20, 30, 40, 500, True))
+            self.assertEqual(fake_adb.swipes[1], (50, 60, 70, 80, 900, True))
+            self.assertEqual(fake_adb.swipes[2], (540, 610, 540, 1310, 400, True))
+            self.assertEqual(fake_adb.backs, [True])
+            self.assertEqual([event.step_type for event in report.events], ["swipe", "drag", "scroll", "back"])
+            self.assertTrue(report.events[2].metadata["dry_run"])
 
     def test_runner_stops_on_failed_screenshot(self):
         with tempfile.TemporaryDirectory() as tmp:

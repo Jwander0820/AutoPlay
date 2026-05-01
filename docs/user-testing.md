@@ -49,11 +49,11 @@ Use `record-ui` when you want a small UI to generate and save a script instead o
 py -m autoplay record-ui scripts\user-test-daily.yml --screenshot artifacts\manual\user-test-start.png --capture
 ```
 
-Open the printed localhost URL in your browser. Click on the screenshot to add tap steps, use the side controls to add waits, screenshots, and checkpoints, then press `Save Script`. The server writes `scripts\user-test-daily.yml` and returns validation messages. Stop it with `Ctrl+C`.
+Open the printed localhost URL in your browser. Pick a tool at the top of the stage, then act directly on the screenshot: click for taps, drag for swipe/drag/scroll, and use the Template tool to crop a stable UI region. The side controls remain for waits, checkpoints, fallback coordinate edits, and save/test actions. The server writes `scripts\user-test-daily.yml` and returns validation messages. Stop it with `Ctrl+C`.
 
 For a natural step-by-step flow without real taps, do this:
 
-1. Click the screenshot to add a tap step.
+1. Pick the right tool, then click or drag on the screenshot to add the next step.
 2. Manually perform that action in BlueStacks if needed.
 3. Press `Capture Latest` in the browser.
 4. Continue recording from the refreshed screenshot.
@@ -70,7 +70,21 @@ If ADB reports more than one device, add the target serial:
 py -m autoplay record-ui scripts\user-test-daily.yml --screenshot artifacts\manual\user-test-start.png --capture --allow-device-input --serial emulator-5554
 ```
 
-Then switch the browser click mode to device capture. Each screenshot click will send a real tap, wait for the configured wait seconds or until the screen stabilizes in auto mode, capture the next screen, and append the tap/wait/screenshot steps. Use this only on safe screens.
+Then switch the browser click mode to device capture. Each screenshot click or supported gesture will send one real device step, wait for the configured wait seconds or until the screen stabilizes in auto mode, capture the next screen, and append the step/wait/screenshot sequence. Use this only on safe screens.
+
+Before testing gestures, check the `手勢校準` area above the screenshot:
+
+- If it says the default gesture parameters are active, expect scroll distance to be approximate.
+- If it says a calibration file is loaded, confirm the shown screen size and vertical/horizontal scroll distances match the BlueStacks instance you are testing.
+- When a gesture lands on an unexpected screen, note the active calibration status, direction, distance, wait mode, and whether the post-action screenshot changed too early or too late.
+
+To create a first calibration file before opening the recorder:
+
+```powershell
+py -m autoplay calibration write --serial emulator-5554 --from-screenshot artifacts\manual\user-test-start.png --scroll-vertical-distance 760 --scroll-horizontal-distance 520
+py -m autoplay calibration show --serial emulator-5554
+py -m autoplay scroll down --calibrated --serial emulator-5554
+```
 
 The browser UI can also test the current YAML directly. Use the dry-run test first; only use the real test button after validation and on a safe screen.
 
@@ -88,7 +102,7 @@ To capture the current BlueStacks screen and create a local HTML script builder:
 py -m autoplay click-map artifacts\manual\user-test-start.png --capture --out artifacts\manual\user-test-builder.html --script-out user-test-daily.yml
 ```
 
-Open `artifacts\manual\user-test-builder.html` in your browser. Click on the screenshot to add tap steps, use the side controls to add waits, screenshots, and checkpoints, then press `Download Script`. Save or move the downloaded YAML to `scripts\user-test-daily.yml`.
+Open `artifacts\manual\user-test-builder.html` in your browser. Pick a tool, then click or drag directly on the screenshot to record taps and gestures. Use the side controls for waits, checkpoints, and fallback edits, then press `Download Script`. Save or move the downloaded YAML to `scripts\user-test-daily.yml`.
 
 If you already have a screenshot, omit `--capture`:
 

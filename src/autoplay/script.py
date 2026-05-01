@@ -19,6 +19,39 @@ class TapStep:
 
 
 @dataclass(frozen=True)
+class SwipeStep:
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+    duration_ms: int = 300
+    label: str | None = None
+
+
+@dataclass(frozen=True)
+class DragStep:
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+    duration_ms: int = 700
+    label: str | None = None
+
+
+@dataclass(frozen=True)
+class ScrollStep:
+    direction: str
+    distance: int | None = None
+    duration_ms: int = 400
+    label: str | None = None
+
+
+@dataclass(frozen=True)
+class BackStep:
+    label: str | None = None
+
+
+@dataclass(frozen=True)
 class WaitStep:
     seconds: float
 
@@ -50,7 +83,12 @@ class CheckpointMatchStep:
     region: Region | None = None
 
 
-Step = TapStep | WaitStep | ScreenshotStep | CheckpointExistsStep | CheckpointMatchStep
+Step = TapStep | SwipeStep | DragStep | ScrollStep | BackStep | WaitStep | ScreenshotStep | CheckpointExistsStep | CheckpointMatchStep
+
+
+MIN_GESTURE_DURATION_MS = 50
+MAX_GESTURE_DURATION_MS = 5000
+VALID_SCROLL_DIRECTIONS = {"up", "down", "left", "right"}
 
 
 @dataclass(frozen=True)
@@ -129,6 +167,36 @@ def _parse_step(raw_step: Any, base_dir: Path) -> Step:
             raise ScriptError("'tap.label' must be a string.")
         return TapStep(x=x, y=y, label=label)
 
+    if step_type in {"swipe", "drag"}:
+        x1 = _parse_coordinate_field(raw_step, step_type, "x1")
+        y1 = _parse_coordinate_field(raw_step, step_type, "y1")
+        x2 = _parse_coordinate_field(raw_step, step_type, "x2")
+        y2 = _parse_coordinate_field(raw_step, step_type, "y2")
+        default_duration = 300 if step_type == "swipe" else 700
+        duration_ms = _parse_duration_ms(raw_step.get("duration_ms", default_duration), step_type)
+        label = _parse_optional_label(raw_step, step_type)
+        if step_type == "swipe":
+            return SwipeStep(x1=x1, y1=y1, x2=x2, y2=y2, duration_ms=duration_ms, label=label)
+        return DragStep(x1=x1, y1=y1, x2=x2, y2=y2, duration_ms=duration_ms, label=label)
+
+    if step_type == "scroll":
+        direction = raw_step.get("direction")
+        if direction not in VALID_SCROLL_DIRECTIONS:
+            raise ScriptError("'scroll.direction' must be one of: up, down, left, right.")
+        distance = raw_step.get("distance")
+        if distance is not None:
+            if not isinstance(distance, int):
+                raise ScriptError("'scroll.distance' must be a positive integer.")
+            if distance <= 0:
+                raise ScriptError("'scroll.distance' must be positive.")
+        duration_ms = _parse_duration_ms(raw_step.get("duration_ms", 400), "scroll")
+        label = _parse_optional_label(raw_step, "scroll")
+        return ScrollStep(direction=direction, distance=distance, duration_ms=duration_ms, label=label)
+
+    if step_type == "back":
+        label = _parse_optional_label(raw_step, "back")
+        return BackStep(label=label)
+
     if step_type == "screenshot":
         out = raw_step.get("out")
         if not isinstance(out, str):
@@ -184,6 +252,32 @@ def _parse_tolerance(value: Any) -> int:
     if value < 0 or value > 255:
         raise ScriptError("'checkpoint_match.tolerance' must be between 0 and 255.")
     return value
+
+
+def _parse_coordinate_field(raw_step: dict, step_type: str, name: str) -> int:
+    value = raw_step.get(name)
+    if not isinstance(value, int):
+        raise ScriptError(f"'{step_type}.{name}' must be an integer.")
+    if value < 0:
+        raise ScriptError(f"'{step_type}.{name}' must be non-negative.")
+    return value
+
+
+def _parse_duration_ms(value: Any, step_type: str) -> int:
+    if not isinstance(value, int):
+        raise ScriptError(f"'{step_type}.duration_ms' must be an integer.")
+    if value < MIN_GESTURE_DURATION_MS or value > MAX_GESTURE_DURATION_MS:
+        raise ScriptError(
+            f"'{step_type}.duration_ms' must be between {MIN_GESTURE_DURATION_MS} and {MAX_GESTURE_DURATION_MS}."
+        )
+    return value
+
+
+def _parse_optional_label(raw_step: dict, step_type: str) -> str | None:
+    label = raw_step.get("label")
+    if label is not None and not isinstance(label, str):
+        raise ScriptError(f"'{step_type}.label' must be a string.")
+    return label
 
 
 def _parse_region(value: Any) -> Region | None:
