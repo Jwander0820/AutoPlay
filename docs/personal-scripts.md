@@ -71,6 +71,14 @@ py -m autoplay calibration show --serial emulator-5554
 py -m autoplay scroll down --calibrated --serial emulator-5554
 ```
 
+For a safer guided flow, let AutoPlay preview the scroll command and ask for tester feedback before saving the profile:
+
+```powershell
+py -m autoplay calibration guide --serial emulator-5554 --from-screenshot artifacts\manual\start.png
+```
+
+Without `--yes`, the guide only prints dry-run preview commands. With `--yes`, it still asks for an explicit `yes` before each single real scroll test. The final profile is saved only after the final save confirmation, and a local notes file is written under `artifacts/calibration/`.
+
 If you prefer a standalone HTML file with no local server, generate an offline builder:
 
 ```powershell
@@ -203,7 +211,7 @@ AutoPlay does not yet make decisions from the game screen by itself. The planned
 
 AI can help draft and revise YAML from screenshots and reports, but the current runtime is still deterministic: validate, screenshot, checkpoint, wait, and tap. That is intentional for user testing because it keeps each action reviewable.
 
-The immediate next automation step is guided gesture calibration. Current calibration profiles can be written and shown with `py -m autoplay calibration write/show`, but the interactive `calibration guide` workflow is still planned in `docs/specs/0020-guided-gesture-calibration.md`.
+The immediate next automation step is testing guided gesture calibration on a real BlueStacks profile, then using those notes to tighten checkpoint-after-gesture authoring and recorder UI hints.
 
 Until then, the personalization loop is:
 

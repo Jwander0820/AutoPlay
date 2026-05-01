@@ -7,7 +7,17 @@ import sys
 from . import api
 from .agent_runner import agent_run_script
 from .agent_tools import SafetyError
-from .calibration import CalibrationProfile, calibration_path_for_serial, load_calibration_for_serial, save_calibration_profile
+from .calibration import (
+    CalibrationProfile,
+    adjust_scroll_distance,
+    calibration_notes_path_for_serial,
+    calibration_path_for_serial,
+    draft_calibration_profile,
+    load_calibration_for_serial,
+    render_calibration_note,
+    save_calibration_note,
+    save_calibration_profile,
+)
 from .click_map import capture_click_map, write_click_map
 from .image_match import ImageError, read_png
 from .live_click_recorder import LiveClickRecorderError, run_windows_live_click_recorder
@@ -109,6 +119,17 @@ def build_parser() -> argparse.ArgumentParser:
     calibration_write.add_argument("--default-swipe-duration-ms", type=int, default=400)
     calibration_write.add_argument("--default-drag-duration-ms", type=int, default=700)
     calibration_write.set_defaults(func=_calibration_write)
+
+    calibration_guide = calibration_subparsers.add_parser("guide", help="Interactively derive and save a gesture calibration profile.")
+    calibration_guide.add_argument("--serial", help="ADB serial for this calibration profile.")
+    calibration_guide.add_argument("--artifact-root", default="artifacts", help="Root for calibration profiles and notes.")
+    calibration_guide.add_argument("--from-screenshot", help="Use this PNG screenshot to fill screen width and height.")
+    calibration_guide.add_argument("--duration-ms", type=int, default=400, help="Scroll duration used for previews and optional real tests.")
+    calibration_guide.add_argument("--adjustment", type=int, default=80, help="Pixels to add/subtract when feedback is short or long.")
+    calibration_guide.add_argument("--max-rounds", type=int, default=6, help="Maximum feedback rounds per scroll axis.")
+    calibration_guide.add_argument("--yes", action="store_true", help="Allow optional one-scroll real tests after an additional prompt.")
+    calibration_guide.add_argument("--adb-path", help="Override HD-Adb.exe path when --yes real tests are confirmed.")
+    calibration_guide.set_defaults(func=_calibration_guide)
 
     run = subparsers.add_parser("run", help="Run an AutoPlay YAML script.")
     run.add_argument("script", help="Path to YAML script.")
@@ -307,6 +328,115 @@ def _calibration_write(args: argparse.Namespace) -> int:
     print(f"scroll_vertical_distance: {profile.scroll_vertical_distance}")
     print(f"scroll_horizontal_distance: {profile.scroll_horizontal_distance}")
     return 0
+
+
+def _calibration_guide(args: argparse.Namespace) -> int:
+    load_result = load_calibration_for_serial(args.serial, artifact_root=args.artifact_root)
+    for warning in load_result.warnings:
+        print(f"WARNING: {warning}", file=sys.stderr)
+    if load_result.warnings:
+        return 1
+
+    screen_width = load_result.profile.screen_width
+    screen_height = load_result.profile.screen_height
+    if args.from_screenshot:
+        screenshot = read_png(args.from_screenshot)
+        screen_width = screenshot.width
+        screen_height = screenshot.height
+
+    profile = draft_calibration_profile(load_result.profile, serial=args.serial, screen_width=screen_width, screen_height=screen_height)
+    print("Guided gesture calibration")
+    print(f"Profile path: {load_result.path}")
+    print(f"Loaded existing profile: {str(load_result.loaded).lower()}")
+    print(f"Screen: {profile.screen_width}x{profile.screen_height}")
+    print(f"Real device input: {'enabled with confirmation' if args.yes else 'disabled'}")
+
+    vertical = _calibrate_scroll_axis(args, profile, axis="vertical", direction="down", distance=profile.scroll_vertical_distance)
+    profile = draft_calibration_profile(profile, scroll_vertical_distance=vertical)
+    horizontal = _calibrate_scroll_axis(args, profile, axis="horizontal", direction="right", distance=profile.scroll_horizontal_distance)
+    profile = draft_calibration_profile(profile, scroll_horizontal_distance=horizontal)
+
+    print("Final calibration draft:")
+    print(f"screen: {profile.screen_width}x{profile.screen_height}")
+    print(f"scroll_vertical_distance: {profile.scroll_vertical_distance}")
+    print(f"scroll_horizontal_distance: {profile.scroll_horizontal_distance}")
+
+    if not _confirm("Save this calibration profile? Type yes to save: "):
+        print("Calibration profile was not saved.")
+        return 0
+
+    profile_path = save_calibration_profile(profile, load_result.path or calibration_path_for_serial(args.artifact_root, args.serial))
+    comments = _prompt("Optional tester comments for notes: ").strip()
+    note = render_calibration_note(
+        profile,
+        screenshot_path=args.from_screenshot,
+        tested_directions=("down", "right"),
+        comments=comments,
+    )
+    note_path = save_calibration_note(note, calibration_notes_path_for_serial(args.artifact_root, args.serial))
+    print(f"Wrote calibration: {profile_path}")
+    print(f"Wrote notes: {note_path}")
+    return 0
+
+
+def _calibrate_scroll_axis(args: argparse.Namespace, profile: CalibrationProfile, axis: str, direction: str, distance: int) -> int:
+    if args.max_rounds <= 0:
+        raise ScriptError("calibration guide --max-rounds must be a positive integer.")
+    current = distance
+    for _round in range(args.max_rounds):
+        print(f"{axis} scroll distance: {current}")
+        preview = api.scroll(
+            direction,
+            distance=current,
+            duration_ms=args.duration_ms,
+            adb_path=args.adb_path,
+            serial=args.serial,
+            execute=False,
+            screen_width=profile.screen_width,
+            screen_height=profile.screen_height,
+        )
+        print("Preview command:")
+        print(" ".join(preview.command))
+        if args.yes and _confirm(f"Send one real {direction} scroll now? Type yes to run: "):
+            # --yes opens the door to real input, but each individual scroll
+            # still requires a fresh confirmation so calibration remains bounded.
+            real = api.scroll(
+                direction,
+                distance=current,
+                duration_ms=args.duration_ms,
+                adb_path=args.adb_path,
+                serial=args.serial,
+                execute=True,
+                screen_width=profile.screen_width,
+                screen_height=profile.screen_height,
+            )
+            print(" ".join(real.command))
+            if not real.ok:
+                _print_adb_failure("calibration scroll", real, adb_path=args.adb_path, serial=args.serial)
+                raise ScriptError("calibration real scroll failed.")
+            print("Scroll sent.")
+        feedback = _prompt(f"Feedback for {axis} distance [ok/short/long/<pixels>]: ")
+        try:
+            next_distance = adjust_scroll_distance(current, feedback, adjustment=args.adjustment)
+        except ScriptError as exc:
+            print(f"Invalid feedback: {exc}")
+            continue
+        if next_distance == current:
+            return current
+        current = next_distance
+    print(f"Reached max rounds for {axis}; keeping distance {current}.")
+    return current
+
+
+def _confirm(prompt: str) -> bool:
+    return _prompt(prompt).strip().lower() == "yes"
+
+
+def _prompt(prompt: str) -> str:
+    try:
+        return input(prompt)
+    except EOFError as exc:
+        raise ScriptError("calibration guide requires interactive input.") from exc
 
 
 def _run(args: argparse.Namespace) -> int:

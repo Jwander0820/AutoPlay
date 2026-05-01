@@ -54,6 +54,7 @@ def render_builder_html(
     run_url: str | None = None,
     template_url: str | None = None,
     calibration: dict | None = None,
+    calibration_guide_command: str | None = None,
     allow_device_input: bool = False,
     profile_adb_path: str | None = None,
     profile_serial: str | None = None,
@@ -69,6 +70,7 @@ def render_builder_html(
     run_url_value = json.dumps(run_url)
     template_url_value = json.dumps(template_url)
     calibration_value = json.dumps(calibration or {})
+    calibration_guide_command_value = json.dumps(calibration_guide_command)
     allow_device_input_value = json.dumps(allow_device_input)
     profile_value = json.dumps({"adb_path": profile_adb_path, "serial": profile_serial})
     template = """<!doctype html>
@@ -79,12 +81,12 @@ def render_builder_html(
   <title>AutoPlay 錄製工作台 - __TITLE__</title>
   <style>
     :root {
-      --bg: #f6f4ef;
-      --surface: #fffdfa;
-      --surface-2: #eef5f2;
+      --bg: #f4f7f8;
+      --surface: #ffffff;
+      --surface-2: #eef4f2;
       --ink: #172126;
       --muted: #66727a;
-      --line: #d8ddd7;
+      --line: #d8e0e2;
       --accent: #0f7b68;
       --accent-strong: #075f50;
       --danger: #a8323a;
@@ -108,7 +110,7 @@ def render_builder_html(
       align-items: center;
       padding: 14px 18px;
       border-bottom: 1px solid var(--line);
-      background: rgba(255, 253, 250, 0.96);
+      background: rgba(255, 255, 255, 0.96);
       backdrop-filter: blur(14px);
     }
     .eyebrow {
@@ -166,6 +168,11 @@ def render_builder_html(
     }
     button.ghost {
       background: transparent;
+    }
+    button.mini {
+      min-height: 28px;
+      padding: 4px 8px;
+      font-size: 12px;
     }
     button[disabled] {
       cursor: not-allowed;
@@ -240,7 +247,7 @@ def render_builder_html(
     .tool-card {
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: rgba(255, 253, 250, 0.82);
+      background: rgba(255, 255, 255, 0.86);
       padding: 12px 14px;
     }
     .canvas-meta {
@@ -259,6 +266,63 @@ def render_builder_html(
     }
     .calibration-state strong {
       color: var(--ink);
+    }
+    .calibration-command {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .calibration-command-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+    }
+    .calibration-command code {
+      display: block;
+      margin-top: 4px;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      color: var(--ink);
+    }
+    .next-action {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 12px;
+      padding: 12px 14px;
+      border: 1px solid #b9d9d0;
+      border-radius: 8px;
+      background: #eef8f5;
+    }
+    .next-action[hidden] {
+      display: none;
+    }
+    .next-action strong {
+      display: block;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .next-action p {
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .next-action-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .next-label {
+      display: block;
+      margin-bottom: 2px;
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 800;
     }
     .tool-segment {
       grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -377,8 +441,13 @@ def render_builder_html(
       pointer-events: none;
     }
     .inspector {
+      position: sticky;
+      top: 82px;
+      max-height: calc(100svh - 100px);
+      overflow: auto;
       display: grid;
       gap: 14px;
+      padding-right: 2px;
     }
     .panel {
       border: 1px solid var(--line);
@@ -409,7 +478,7 @@ def render_builder_html(
       padding: 4px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #f3f6f3;
+      background: #edf2f4;
     }
     .segmented button {
       min-height: 34px;
@@ -515,6 +584,12 @@ def render_builder_html(
       .workspace {
         grid-template-columns: 1fr;
       }
+      .inspector {
+        position: static;
+        max-height: none;
+        overflow: visible;
+        padding-right: 0;
+      }
       .toolstrip {
         grid-template-columns: 1fr;
       }
@@ -560,6 +635,17 @@ def render_builder_html(
         </div>
         <div class="status" id="status" aria-live="polite">待命中</div>
       </div>
+      <div class="next-action" id="nextAction" hidden>
+        <div>
+          <span class="next-label">下一步</span>
+          <strong id="nextActionTitle">建立畫面驗證</strong>
+          <p id="nextActionText">框選新畫面上的穩定 UI，儲存成 template checkpoint。</p>
+        </div>
+        <div class="next-action-actions">
+          <button id="nextActionButton" type="button">框選 Template</button>
+          <button id="nextActionDismiss" type="button" class="ghost">稍後</button>
+        </div>
+      </div>
       <div class="toolstrip">
         <div class="tool-card">
           <div class="field-title">互動工具</div>
@@ -585,6 +671,13 @@ def render_builder_html(
           <div class="canvas-meta">
             <span id="calibrationScreen">畫面：1080 x 1920</span>
             <span id="calibrationScroll">捲動：700 / 700</span>
+          </div>
+          <div class="calibration-command" id="calibrationGuide" hidden>
+            <div class="calibration-command-head">
+              <span>校準指令</span>
+              <button id="copyCalibrationGuide" type="button" class="mini">複製</button>
+            </div>
+            <code id="calibrationGuideCommand"></code>
           </div>
         </div>
       </div>
@@ -749,6 +842,7 @@ def render_builder_html(
     const runUrl = __RUN_URL__;
     const templateUrl = __TEMPLATE_URL__;
     const calibration = __CALIBRATION__;
+    const calibrationGuideCommand = __CALIBRATION_GUIDE_COMMAND__;
     const allowDeviceInput = __ALLOW_DEVICE_INPUT__;
     const profile = __PROFILE__;
     const steps = [{ type: 'screenshot', out: initialScreenshotPath }];
@@ -759,6 +853,11 @@ def render_builder_html(
     const commands = document.getElementById('commands');
     const yaml = document.getElementById('yaml');
     const status = document.getElementById('status');
+    const nextAction = document.getElementById('nextAction');
+    const nextActionTitle = document.getElementById('nextActionTitle');
+    const nextActionText = document.getElementById('nextActionText');
+    const nextActionButton = document.getElementById('nextActionButton');
+    const nextActionDismiss = document.getElementById('nextActionDismiss');
     const saveButton = document.getElementById('saveScript');
     const captureButton = document.getElementById('captureLatest');
     const runDryButton = document.getElementById('runDry');
@@ -778,6 +877,9 @@ def render_builder_html(
     const calibrationState = document.getElementById('calibrationState');
     const calibrationScreen = document.getElementById('calibrationScreen');
     const calibrationScroll = document.getElementById('calibrationScroll');
+    const calibrationGuide = document.getElementById('calibrationGuide');
+    const calibrationGuideCommandEl = document.getElementById('calibrationGuideCommand');
+    const copyCalibrationGuideButton = document.getElementById('copyCalibrationGuide');
     const toolButtons = {
       tap: document.getElementById('toolTap'),
       swipe: document.getElementById('toolSwipe'),
@@ -877,9 +979,7 @@ def render_builder_html(
     });
     startCropButton.addEventListener('click', () => {
       if (!templateUrl) return;
-      ensureCropSelection();
-      cropSelection.style.display = 'none';
-      setInteractionTool('crop');
+      focusTemplateWorkflow();
     });
     saveTemplateButton.addEventListener('click', async () => {
       if (!templateUrl) return;
@@ -899,10 +999,23 @@ def render_builder_html(
         document.getElementById('checkpointPath').value = payload.source_path || source;
         document.getElementById('templatePath').value = payload.template_path || template;
         recordSteps(payload.steps || [], { autoBefore: false });
+        hideNextAction();
         setStatus(payload.messages ? payload.messages.join(' ') : '已儲存 template。', 'ok');
       } catch (error) {
         setStatus(`Template 儲存失敗：${error}`, 'danger');
       }
+    });
+    nextActionButton.addEventListener('click', () => {
+      focusTemplateWorkflow();
+    });
+    nextActionDismiss.addEventListener('click', () => {
+      hideNextAction();
+      setStatus('已略過這次 checkpoint 提示。', 'warn');
+    });
+    copyCalibrationGuideButton.addEventListener('click', async () => {
+      if (!calibrationGuideCommand) return;
+      await navigator.clipboard.writeText(calibrationGuideCommand);
+      setStatus('已複製校準指令。', 'ok');
     });
     document.querySelectorAll('button[data-scroll]').forEach(button => {
       button.addEventListener('click', async () => {
@@ -1014,10 +1127,14 @@ def render_builder_html(
       document.getElementById('gestureDistance').value = gestureDefaults.verticalDistance;
       document.getElementById('gestureDuration').value = gestureDefaults.swipeDuration;
       const statusText = gestureDefaults.loaded ? `已套用 ${gestureDefaults.path}` : '使用預設手勢參數';
-      const warningText = gestureDefaults.warnings.length ? `；${gestureDefaults.warnings[0]}` : '';
+      const warningText = gestureDefaults.warnings.length ? `；${gestureDefaults.warnings.join('；')}` : '';
       calibrationState.innerHTML = `<strong>${escapeHtml(statusText)}</strong>${escapeHtml(warningText)}`;
       calibrationScreen.textContent = `畫面：${gestureDefaults.screenWidth} x ${gestureDefaults.screenHeight}`;
       calibrationScroll.textContent = `捲動：${gestureDefaults.verticalDistance} / ${gestureDefaults.horizontalDistance}`;
+      if (calibrationGuideCommand) {
+        calibrationGuide.hidden = false;
+        calibrationGuideCommandEl.textContent = calibrationGuideCommand;
+      }
       updateToolMeta();
     }
 
@@ -1503,8 +1620,36 @@ def render_builder_html(
       }
       lastRecordedAt = performance.now();
       const waitText = payload.auto_wait && payload.wait_seconds ? ` 自動等待 ${payload.wait_seconds} 秒。` : '';
-      setStatus((payload.messages ? payload.messages.join(' ') : payload.status) + waitText, 'ok');
+      const checkpointHint = checkpointHintForCapture(payload, autoBefore);
+      setStatus((payload.messages ? payload.messages.join(' ') : payload.status) + waitText + checkpointHint, 'ok');
+      if (checkpointHint) {
+        showNextAction('建立畫面驗證', '框選新畫面上的穩定 UI，儲存成 template checkpoint。');
+        focusTemplateWorkflow({ quiet: true });
+      }
       render();
+    }
+
+    function checkpointHintForCapture(payload, autoBefore) {
+      if (autoBefore || !templateUrl || !Array.isArray(payload.steps)) return '';
+      const hasDeviceAction = payload.steps.some(step => ['tap', 'swipe', 'drag', 'scroll', 'back'].includes(step.type));
+      return hasDeviceAction ? ' 建議接著框選穩定 UI 區塊，儲存 template checkpoint。' : '';
+    }
+
+    function focusTemplateWorkflow(options = {}) {
+      if (!templateUrl) return;
+      ensureCropSelection();
+      cropSelection.style.display = 'none';
+      setInteractionTool('crop', options);
+    }
+
+    function showNextAction(title, text) {
+      nextActionTitle.textContent = title;
+      nextActionText.textContent = text;
+      nextAction.hidden = false;
+    }
+
+    function hideNextAction() {
+      nextAction.hidden = true;
     }
 
     function nextSuggestedPath(path) {
@@ -1648,6 +1793,7 @@ def render_builder_html(
         .replace("__RUN_URL__", run_url_value)
         .replace("__TEMPLATE_URL__", template_url_value)
         .replace("__CALIBRATION__", calibration_value)
+        .replace("__CALIBRATION_GUIDE_COMMAND__", calibration_guide_command_value)
         .replace("__ALLOW_DEVICE_INPUT__", allow_device_input_value)
         .replace("__PROFILE__", profile_value)
     )

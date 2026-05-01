@@ -8,11 +8,62 @@ from unittest import mock
 
 from autoplay.adb import AdbResult
 from autoplay.image_match import read_png
-from autoplay.recorder_server import RecorderServerConfig, create_recorder_server
+from autoplay.calibration import load_calibration_for_serial
+from autoplay.recorder_server import RecorderServerConfig, _calibration_guide_command, _calibration_ui_dict, _template_quality_messages, create_recorder_server
 from png_helpers import write_rgba_png
 
 
 class RecorderServerTest(unittest.TestCase):
+    def test_calibration_guide_command_uses_current_serial_and_paths(self):
+        config = RecorderServerConfig(
+            script_path=Path("/tmp/project/scripts/daily.yml"),
+            screenshot_path=Path("/tmp/project/artifacts/manual/start screen.png"),
+            serial="emulator-5554",
+        )
+
+        command = _calibration_guide_command(config)
+
+        self.assertIn("calibration guide --serial emulator-5554", command)
+        self.assertIn("--from-screenshot '/tmp/project/artifacts/manual/start screen.png'", command)
+        self.assertIn("--artifact-root /tmp/project/artifacts", command)
+
+    def test_calibration_ui_dict_warns_when_screenshot_size_differs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            screenshot = tmp_path / "screen.png"
+            write_rgba_png(screenshot, 4, 3, [(255, 0, 0, 255)] * 12)
+            calibration = tmp_path / "artifacts" / "calibration" / "bluestacks-emulator-5554.json"
+            calibration.parent.mkdir(parents=True)
+            calibration.write_text(
+                json.dumps(
+                    {
+                        "serial": "emulator-5554",
+                        "screen_width": 1200,
+                        "screen_height": 2000,
+                        "scroll_vertical_distance": 820,
+                        "scroll_horizontal_distance": 560,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            data = _calibration_ui_dict(load_calibration_for_serial("emulator-5554", artifact_root=tmp_path / "artifacts"), screenshot)
+
+            self.assertEqual(data["current_screen_width"], 4)
+            self.assertEqual(data["current_screen_height"], 3)
+            self.assertIn("Current screenshot is 4x3", data["warnings"][0])
+
+    def test_template_quality_messages_warn_for_fragile_crops(self):
+        messages = _template_quality_messages(4, 6, 100, 100, 0.85)
+
+        self.assertIn("very small crop", " ".join(messages))
+        self.assertIn("low threshold", " ".join(messages))
+
+    def test_template_quality_messages_warn_for_large_crops(self):
+        messages = _template_quality_messages(60, 60, 100, 100, 0.95)
+
+        self.assertIn("large crop", " ".join(messages))
+
     def test_serves_builder_and_saves_script(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -62,6 +113,26 @@ class RecorderServerTest(unittest.TestCase):
 
             self.assertIn('"serial": "emulator-5554"', html)
             self.assertIn("profileToYaml", html)
+
+    def test_served_builder_shows_calibration_guide_command_for_serial(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            screenshot = tmp_path / "screen.png"
+            script = tmp_path / "scripts" / "daily.yml"
+            write_rgba_png(screenshot, 1, 1, [(255, 0, 0, 255)])
+            ready = _create_or_skip(self, RecorderServerConfig(script_path=script, screenshot_path=screenshot, port=0, serial="emulator-5554"))
+            thread = threading.Thread(target=ready.server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                html = request.urlopen(ready.url, timeout=2).read().decode("utf-8")
+            finally:
+                ready.server.shutdown()
+                ready.server.server_close()
+                thread.join(timeout=2)
+
+            self.assertIn("calibration guide --serial emulator-5554", html)
+            self.assertIn(f"--from-screenshot {screenshot.as_posix()}", html)
+            self.assertIn(f"--artifact-root {(tmp_path / 'artifacts').as_posix()}", html)
 
     def test_served_builder_includes_device_step_capture_endpoint_when_enabled(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -552,6 +623,9 @@ class RecorderServerTest(unittest.TestCase):
             self.assertEqual(response["template_path"], template.as_posix())
             self.assertEqual(response["steps"][0]["type"], "checkpoint_match")
             self.assertEqual(response["steps"][0]["threshold"], 0.9)
+            self.assertTrue(response["match_preview"]["matched"])
+            self.assertEqual(response["match_preview"]["score"], 1.0)
+            self.assertIn("Checkpoint preview: matched=true", " ".join(response["messages"]))
             cropped = read_png(template)
             self.assertEqual((cropped.width, cropped.height), (2, 2))
             self.assertEqual(cropped.pixel(0, 0), (0, 255, 0, 255))

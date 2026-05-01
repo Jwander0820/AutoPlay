@@ -27,6 +27,7 @@ Use the project skill at `skills/autoplay/SKILL.md` when work involves AutoPlay-
 - User testing guide: `docs/user-testing.md`
 - Personal script workflow: `docs/personal-scripts.md`
 - Next-stage handoff: `docs/next-stage.md`
+- Latest stage report: `docs/stage-report.md`
 - Implemented specs: `docs/specs/`
 
 ## Autonomous maintenance loop
@@ -56,7 +57,9 @@ Use the project skill at `skills/autoplay/SKILL.md` when work involves AutoPlay-
 - `record-ui` can now author tap, swipe, drag, scroll, back, wait, screenshot, and `checkpoint_match` steps from the screenshot workspace.
 - Device-mode recorder flows can execute one tap or supported gesture, wait manually or until screen stability, capture the next screenshot, and append the reviewable YAML sequence.
 - Serial-aware calibration profiles exist through `calibration write/show`, `scroll --calibrated`, recorder profile loading, and visible calibration status in the Web UI.
-- `docs/specs/0020-guided-gesture-calibration.md` is still a draft. Do not describe `calibration guide` as implemented until the CLI workflow, profile/note writing, and tests land.
+- `docs/specs/0020-guided-gesture-calibration.md` is implemented as a CLI-first `calibration guide` workflow with dry-run previews, explicit real-scroll confirmation, profile saving, local notes, and tests.
+- `record-ui` shows a matching `calibration guide` command when launched with a serial, so tester handoff from screenshot recording to gesture calibration is visible in the UI.
+- `docs/stage-report.md` records the 2026-05-01 guided calibration report, verification commands, safety notes, and real BlueStacks follow-up.
 - The next automation boundary is calibration and checkpoint reliability, not unrestricted screen-solving.
 
 ## Implemented specs
@@ -76,18 +79,17 @@ Use the project skill at `skills/autoplay/SKILL.md` when work involves AutoPlay-
 - `docs/specs/0017-record-ui-direct-gesture-authoring.md`: direct screenshot gesture authoring and recorder UI workflow polish.
 - `docs/specs/0018-gesture-capture-loop.md`: execute-and-capture recorder flow for gestures in device mode.
 - `docs/specs/0019-bluestacks-gesture-calibration-profile.md`: serial-aware gesture calibration profile loading, CLI profile authoring, and recorder UI calibration visibility.
-
-## Draft specs
-
-- `docs/specs/0020-guided-gesture-calibration.md`: next CLI-first workflow for deriving profile values from real BlueStacks tester feedback.
+- `docs/specs/0020-guided-gesture-calibration.md`: CLI-first workflow for deriving profile values from real BlueStacks tester feedback.
+- `docs/specs/0021-post-action-checkpoint-nudge.md`: record-ui nudge that switches to Template mode after device tap/gesture capture, plus checkpoint preview and template quality hints.
 
 ## Next stage direction
 
 - Calibrate mobile gestures on real BlueStacks profiles, especially scroll distance and screen coordinate assumptions.
-- Continue from `0020-guided-gesture-calibration.md` when turning calibration user-test notes into a guided calibration flow that can derive values from real BlueStacks measurements.
-- Keep the first `calibration guide` implementation CLI-first and bounded: dry-run preview by default, at most one confirmed real scroll per prompt, profile JSON saved only after final confirmation, and local notes written under `artifacts/calibration/`.
+- Use real BlueStacks testing to validate `calibration guide` output and feed the notes back into profile defaults or UI guidance.
+- Keep `calibration guide` bounded: dry-run preview by default, at most one confirmed real scroll per prompt, profile JSON saved only after final confirmation, and local notes written under `artifacts/calibration/`.
+- Verify the `record-ui` calibration-guide command on Windows PowerShell with real paths, especially when screenshot paths contain spaces.
 - Add checkpoint-first user testing around taps and gestures so flows verify screen state after movement.
-- Guided recorder and record-ui can already author `checkpoint_match`; the next work is calibration and decision-loop planning.
+- Guided recorder and record-ui can already author `checkpoint_match`; record-ui now nudges testers toward Template mode after device actions. The next work is validating checkpoint quality and decision-loop planning.
 - Gesture execute-and-capture is available in device mode; the next work is calibrating it on real BlueStacks screens and tightening post-gesture verification.
 - Prefer small typed helpers around recorder payload normalization before adding more recorder endpoints or UI state branches.
 - Use real BlueStacks user testing to calibrate screenshot dimensions, click coordinates, and window/client-area mapping.

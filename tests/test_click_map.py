@@ -4,7 +4,7 @@ import unittest
 from unittest import mock
 
 from autoplay.adb import AdbResult
-from autoplay.click_map import capture_click_map, write_click_map
+from autoplay.click_map import capture_click_map, render_builder_html, write_click_map
 from png_helpers import write_rgba_png
 
 
@@ -56,6 +56,45 @@ class ClickMapTest(unittest.TestCase):
 
             self.assertEqual(report.script_path, script)
             self.assertIn('const scriptFilename = "my-daily.yml"', html.read_text(encoding="utf-8"))
+
+    def test_render_builder_html_can_show_calibration_guide_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            screenshot = Path(tmp) / "screen.png"
+            write_rgba_png(screenshot, 1, 1, [(255, 0, 0, 255)])
+
+            html = render_builder_html(
+                screenshot,
+                screenshot.read_bytes(),
+                Path(tmp) / "scripts" / "daily.yml",
+                calibration_guide_command="py -m autoplay calibration guide --serial emulator-5554",
+            )
+
+            self.assertIn("校準指令", html)
+            self.assertIn('id="copyCalibrationGuide"', html)
+            self.assertIn("已複製校準指令", html)
+            self.assertIn("calibration guide --serial emulator-5554", html)
+
+    def test_render_builder_html_nudges_checkpoint_after_device_capture(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            screenshot = Path(tmp) / "screen.png"
+            write_rgba_png(screenshot, 1, 1, [(255, 0, 0, 255)])
+
+            html = render_builder_html(
+                screenshot,
+                screenshot.read_bytes(),
+                Path(tmp) / "scripts" / "daily.yml",
+                template_url="/api/template",
+                step_capture_url="/api/device-step-capture",
+            )
+
+            self.assertIn("checkpointHintForCapture", html)
+            self.assertIn('id="nextAction"', html)
+            self.assertIn('id="nextActionDismiss"', html)
+            self.assertIn("建議接著框選穩定 UI 區塊", html)
+            self.assertIn("建立畫面驗證", html)
+            self.assertIn("showNextAction", html)
+            self.assertIn("已略過這次 checkpoint 提示", html)
+            self.assertIn("setInteractionTool('crop'", html)
 
     def test_capture_click_map_captures_before_writing_html(self):
         with tempfile.TemporaryDirectory() as tmp:

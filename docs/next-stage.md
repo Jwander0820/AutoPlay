@@ -31,14 +31,17 @@ The current handoff point is after specs `0014` through `0019`:
 - Gesture primitives are implemented across the project and covered by unit tests.
 - `record-ui` can directly author gestures on the screenshot canvas and can execute one tap/gesture with wait-and-capture when launched with `--allow-device-input`.
 - Template cropping can append `checkpoint_match`, so user tests can start moving from coordinate-only scripts toward checkpoint-first flows.
-- Calibration profile support exists, but it is still manual: `calibration write/show`, `scroll --calibrated`, serial-aware profile loading, and Web UI calibration visibility are available.
-- `0020-guided-gesture-calibration.md` is the next draft, not completed behavior.
+- Calibration profile support exists through both manual `calibration write/show` and guided `calibration guide`, plus `scroll --calibrated`, serial-aware profile loading, and Web UI calibration visibility.
+- `calibration guide` is now available as a CLI-first workflow for deriving scroll distances from tester feedback, saving profile JSON, and writing local notes.
+- `record-ui` shows the matching `calibration guide` command when serial context is available.
+- `record-ui` now nudges testers into Template mode after device tap/gesture capture so post-action checkpoints are harder to forget.
+- `docs/stage-report.md` contains the latest stage report, including verification commands and real BlueStacks follow-up.
 
 For the next commit or handoff, keep generated screenshots, calibration outputs, reports, audit logs, and personal scripts local under ignored paths such as `artifacts/` and `scripts/`.
 
 ## Proposed next feature
 
-Build a guided calibration workflow on top of the new serial-aware BlueStacks gesture calibration profile support, then use it to harden recorder gesture behavior and post-gesture verification.
+Use the new guided calibration workflow on real BlueStacks profiles, then use those findings to harden recorder gesture behavior and post-gesture verification.
 
 The completed gesture spec is:
 
@@ -49,9 +52,10 @@ docs/specs/0014-mobile-gestures.md
 The next slice should focus on:
 
 1. Real BlueStacks guided calibration for scroll distances and screen dimensions.
-2. User-test template cropping after taps and gestures, especially whether cropped templates are stable enough.
-3. User-test the new gesture + capture loop, especially whether waits and screenshot transitions feel predictable enough for daily recording.
-4. A first bounded decision loop that chooses the next safe scripted step from screenshots and template matches, then stops for review before real device input.
+2. User-test the exact `calibration guide` command shown by `record-ui`, especially Windows path quoting.
+3. User-test the post-action Template nudge after taps and gestures, especially whether cropped templates are stable enough.
+4. User-test the new gesture + capture loop, especially whether waits and screenshot transitions feel predictable enough for daily recording.
+5. A first bounded decision loop that chooses the next safe scripted step from screenshots and template matches, then stops for review before real device input.
 
 The draft spec for this slice is:
 
@@ -72,11 +76,11 @@ Without calibration and checkpoints, gestures are available but still too coordi
 
 ## Recommended next implementation order
 
-1. Add small non-interactive calibration helpers first: distance adjustment, profile draft creation, and notes rendering.
-2. Add `py -m autoplay calibration guide` on top of those helpers, with dry-run previews by default and explicit confirmation before each real scroll.
-3. Cover helper behavior and CLI parser wiring with unit tests that do not require BlueStacks.
-4. Use a real BlueStacks pass to tune vertical/horizontal defaults, then record the result as local artifacts.
-5. Feed those findings back into checkpoint-after-gesture guidance before starting the bounded decision loop.
+1. Run `py -m autoplay calibration guide --serial ... --from-screenshot ...` on a real BlueStacks screen and inspect the saved JSON/notes.
+2. Confirm the `record-ui` hint works in Windows PowerShell for normal and space-containing paths.
+3. Use a real BlueStacks pass to tune vertical/horizontal defaults, then record the result as local artifacts.
+4. Feed those findings back into checkpoint-after-gesture guidance before starting the bounded decision loop.
+5. Keep adding unit coverage around any new UI/server payload shape before branching recorder state further.
 
 ### Initial gesture semantics
 
@@ -197,6 +201,8 @@ AI-facing tools should call this API rather than shelling out to CLI commands.
 
 `0019-bluestacks-gesture-calibration-profile.md` is implemented for serial-aware calibration profile loading, CLI profile authoring, calibrated scroll execution, and recorder UI calibration visibility.
 
-`0020-guided-gesture-calibration.md` is drafted as the next implementation slice.
+`0020-guided-gesture-calibration.md` is implemented as the CLI-first guided calibration slice.
 
-Next, implement `calibration guide` so testers can derive profile values from real BlueStacks measurements without editing JSON by hand, then test gesture calibration and template stability on real BlueStacks before building a bounded decision loop that uses screenshots and template matches to choose the next safe YAML/script step.
+`0021-post-action-checkpoint-nudge.md` is implemented as a recorder UI workflow nudge after device actions.
+
+Next, test `calibration guide` results, the record-ui guide command, and template stability on real BlueStacks, then build a bounded decision loop that uses screenshots and template matches to choose the next safe YAML/script step.

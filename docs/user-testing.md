@@ -72,6 +72,9 @@ py -m autoplay record-ui scripts\user-test-daily.yml --screenshot artifacts\manu
 
 Then switch the browser click mode to device capture. Each screenshot click or supported gesture will send one real device step, wait for the configured wait seconds or until the screen stabilizes in auto mode, capture the next screen, and append the step/wait/screenshot sequence. Use this only on safe screens.
 
+After a device action capture, the UI should nudge you into Template mode. Try selecting a stable UI element on the new screen and saving it as a `checkpoint_match` before recording the next action.
+When the template is saved, review the checkpoint preview score and any quality hints. Re-crop if the template is tiny, too broad, or only matches because the threshold is low.
+
 Before testing gestures, check the `手勢校準` area above the screenshot:
 
 - If it says the default gesture parameters are active, expect scroll distance to be approximate.
@@ -85,6 +88,16 @@ py -m autoplay calibration write --serial emulator-5554 --from-screenshot artifa
 py -m autoplay calibration show --serial emulator-5554
 py -m autoplay scroll down --calibrated --serial emulator-5554
 ```
+
+Or use the guided flow so the tester can preview, report whether movement is short/ok/long, and save notes:
+
+```powershell
+py -m autoplay calibration guide --serial emulator-5554 --from-screenshot artifacts\manual\user-test-start.png
+```
+
+The guide does not send real device input unless launched with `--yes`, and even then it asks for `yes` before each single real scroll test.
+
+When `record-ui` is launched with `--serial`, the 手勢校準 area shows the matching guide command for the current screenshot. For user testing, try copying that command into PowerShell and note whether the paths work as shown. If the UI warns that the current screenshot size differs from the loaded profile, re-check the BlueStacks resolution before testing gestures.
 
 The browser UI can also test the current YAML directly. Use the dry-run test first; only use the real test button after validation and on a safe screen.
 
@@ -199,6 +212,7 @@ Review the report and audit before trying real taps.
 - `py -m autoplay doctor` output.
 - The script YAML used for the test.
 - The screenshot and template files used by checkpoints.
+- Any calibration JSON and notes created under `artifacts\calibration\`.
 - Any JSON files written with `--report-out`.
 - Any JSONL files written with `--audit-out`.
 - A short note about what was visible on screen when a failure happened.

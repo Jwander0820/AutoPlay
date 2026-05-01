@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft for the next implementation slice.
+Implemented as a CLI-first workflow.
 
 ## Why
 
@@ -50,6 +50,22 @@ The guide should:
 
 The first implementation can be CLI-only. A later UI pass can surface the same workflow inside `record-ui`.
 
+Implemented command:
+
+```powershell
+py -m autoplay calibration guide --serial emulator-5554 --from-screenshot artifacts\manual\start.png --artifact-root artifacts
+```
+
+Real device scroll tests remain disabled by default. Add `--yes` to allow the guide to ask for one explicit `yes` confirmation before each real scroll attempt:
+
+```powershell
+py -m autoplay calibration guide --serial emulator-5554 --from-screenshot artifacts\manual\start.png --yes
+```
+
+The feedback prompt accepts `ok`, `short`, `long`, or an exact positive pixel value. The guide saves the JSON profile only after the tester types `yes` at the final save prompt, then writes a separate local notes file.
+Each axis is bounded by `--max-rounds`, defaulting to 6 feedback rounds.
+Invalid feedback is reported in the prompt and consumes one bounded round instead of crashing the workflow.
+
 ## Data
 
 Continue using the 0019 profile shape:
@@ -95,6 +111,8 @@ Suggested note content:
 - The guide defaults to dry-run previews.
 - Real scroll tests require `--yes` or a clear interactive confirmation.
 - Each real test sends at most one scroll step before returning to the prompt.
+- Each axis has a `--max-rounds` limit so calibration does not become an unbounded prompt loop.
+- Invalid feedback does not execute device input and still respects the round budget.
 - The guide must print the exact ADB command before real execution.
 - Invalid profiles or screenshots should fail with clear errors, not partial writes.
 
@@ -102,22 +120,22 @@ Suggested note content:
 
 After the CLI workflow exists, `record-ui` should expose a small calibration entry point:
 
-- show active profile status near the screenshot
-- link or print the exact `calibration guide` command for the current serial/screenshot
-- keep quick scroll buttons using calibrated vertical/horizontal defaults
-- warn when the current screenshot dimensions differ from the loaded profile
+- Implemented: show active profile status near the screenshot.
+- Implemented: print the exact `calibration guide` command for the current serial/screenshot when a serial is configured.
+- Implemented: keep quick scroll buttons using calibrated vertical/horizontal defaults.
+- Implemented: warn when the current screenshot dimensions differ from the loaded profile.
 
 ## Acceptance Criteria
 
-- A tester can create a useful calibration profile without manually editing JSON.
-- Running the guide without `--yes` never sends device input.
-- The saved profile is immediately visible through `py -m autoplay calibration show --serial ...`.
-- `py -m autoplay scroll down --calibrated --serial ...` uses the saved vertical distance and screen dimensions.
-- `record-ui` still works when calibration is absent, malformed, or incomplete.
-- Unit tests cover profile loading, guide value adjustment, note writing, and CLI parser behavior.
+- Implemented: a tester can create a useful calibration profile without manually editing JSON.
+- Implemented: running the guide without `--yes` never sends device input.
+- Implemented: the saved profile is immediately visible through `py -m autoplay calibration show --serial ...`.
+- Implemented through 0019 integration: `py -m autoplay scroll down --calibrated --serial ...` uses the saved vertical distance and screen dimensions.
+- Implemented through 0019 integration: `record-ui` still works when calibration is absent, malformed, or incomplete.
+- Implemented: unit tests cover profile loading, guide value adjustment, note writing, and CLI parser behavior.
 
 ## Open Questions
 
-- Should the guide ask for "too short / okay / too long", or allow exact numeric entry first?
+- Resolved for the first CLI slice: the guide accepts both "short / ok / long" and exact numeric entry.
 - Should calibration be separated by app orientation or BlueStacks window layout in addition to serial?
 - Should future profiles store observed safe start/end points for scrolls, or keep only screen size and distance?

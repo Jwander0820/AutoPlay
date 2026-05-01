@@ -197,6 +197,99 @@ steps:
             self.assertEqual(written["screen_width"], 3)
             self.assertEqual(written["screen_height"], 2)
 
+    def test_calibration_guide_saves_profile_and_notes_without_real_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            artifact_root = tmp_path / "artifacts"
+            screenshot = tmp_path / "screen.png"
+            write_rgba_png(screenshot, 4, 3, [(255, 0, 0, 255)] * 12)
+            execute_flags = []
+
+            def fake_scroll(*args, **kwargs):
+                execute_flags.append(kwargs.get("execute", False))
+                return AdbResult(command=["adb", "shell", "input", "swipe", "2", "1", "2", "2", "400"], returncode=0, dry_run=not kwargs.get("execute", False))
+
+            with (
+                mock.patch("autoplay.cli.api.scroll", side_effect=fake_scroll),
+                mock.patch("sys.stdin", StringIO("short\nok\n560\nok\nyes\ncalibrated on laptop\n")),
+                mock.patch("sys.stdout", StringIO()),
+            ):
+                self.assertEqual(
+                    main(["calibration", "guide", "--serial", "emulator-5554", "--artifact-root", str(artifact_root), "--from-screenshot", str(screenshot)]),
+                    0,
+                )
+
+            self.assertEqual(execute_flags, [False, False, False, False])
+            path = artifact_root / "calibration" / "bluestacks-emulator-5554.json"
+            note = artifact_root / "calibration" / "bluestacks-emulator-5554-notes.md"
+            written = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(written["screen_width"], 4)
+            self.assertEqual(written["screen_height"], 3)
+            self.assertEqual(written["scroll_vertical_distance"], 780)
+            self.assertEqual(written["scroll_horizontal_distance"], 560)
+            self.assertIn("calibrated on laptop", note.read_text(encoding="utf-8"))
+
+    def test_calibration_guide_requires_yes_prompt_for_real_scroll(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            execute_flags = []
+
+            def fake_scroll(*args, **kwargs):
+                execute_flags.append(kwargs.get("execute", False))
+                return AdbResult(command=["adb", "shell", "input", "swipe"], returncode=0, dry_run=not kwargs.get("execute", False))
+
+            with (
+                mock.patch("autoplay.cli.api.scroll", side_effect=fake_scroll),
+                mock.patch("sys.stdin", StringIO("yes\nok\n\nok\nyes\n\n")),
+                mock.patch("sys.stdout", StringIO()),
+            ):
+                self.assertEqual(
+                    main(["calibration", "guide", "--serial", "emulator-5554", "--artifact-root", str(artifact_root), "--yes"]),
+                    0,
+                )
+
+            self.assertEqual(execute_flags, [False, True, False])
+
+    def test_calibration_guide_keeps_invalid_feedback_bounded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            execute_flags = []
+
+            def fake_scroll(*args, **kwargs):
+                execute_flags.append(kwargs.get("execute", False))
+                return AdbResult(command=["adb", "shell", "input", "swipe"], returncode=0, dry_run=not kwargs.get("execute", False))
+
+            with (
+                mock.patch("autoplay.cli.api.scroll", side_effect=fake_scroll),
+                mock.patch("sys.stdin", StringIO("banana\nok\nok\nyes\n\n")),
+                mock.patch("sys.stdout", new_callable=StringIO) as stdout,
+            ):
+                self.assertEqual(main(["calibration", "guide", "--serial", "emulator-5554", "--artifact-root", str(artifact_root), "--max-rounds", "2"]), 0)
+
+            self.assertEqual(execute_flags, [False, False, False])
+            self.assertIn("Invalid feedback", stdout.getvalue())
+
+    def test_calibration_guide_reports_missing_interactive_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                mock.patch("sys.stdin", StringIO("")),
+                mock.patch("sys.stdout", StringIO()),
+                mock.patch("sys.stderr", new_callable=StringIO) as stderr,
+            ):
+                self.assertEqual(main(["calibration", "guide", "--artifact-root", tmp]), 1)
+
+            self.assertIn("calibration guide requires interactive input", stderr.getvalue())
+
+    def test_calibration_guide_rejects_invalid_max_rounds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                mock.patch("sys.stdout", StringIO()),
+                mock.patch("sys.stderr", new_callable=StringIO) as stderr,
+            ):
+                self.assertEqual(main(["calibration", "guide", "--artifact-root", tmp, "--max-rounds", "0"]), 1)
+
+            self.assertIn("--max-rounds must be a positive integer", stderr.getvalue())
+
     def test_record_appends_step_from_stdin(self):
         with tempfile.TemporaryDirectory() as tmp:
             script_path = Path(tmp) / "script.yml"

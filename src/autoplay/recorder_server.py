@@ -12,9 +12,9 @@ from . import api
 from .adb import AdbResult
 from .agent_runner import agent_run_script
 from .agent_tools import SafetyError
-from .calibration import CalibrationProfile, load_calibration_for_serial
+from .calibration import CalibrationLoadResult, CalibrationProfile, load_calibration_for_serial
 from .click_map import render_builder_html
-from .image_match import ImageError, crop_png_file
+from .image_match import ImageError, crop_png_file, read_png
 from .runner import RunnerError
 from .script import ScriptError
 from .validation import format_report
@@ -168,7 +168,8 @@ def _make_handler(config: RecorderServerConfig):
                     step_capture_url="/api/device-step-capture" if config.allow_device_input else None,
                     run_url="/api/run",
                     template_url="/api/template",
-                    calibration=calibration.to_ui_dict(),
+                    calibration=_calibration_ui_dict(calibration, config.screenshot_path),
+                    calibration_guide_command=_calibration_guide_command(config),
                     allow_device_input=config.allow_device_input,
                     profile_adb_path=config.adb_path,
                     profile_serial=config.serial,
@@ -341,10 +342,16 @@ def _make_handler(config: RecorderServerConfig):
                 return
             try:
                 _require_template_output_path(template, _default_artifact_root(config.script_path))
+                source_image = read_png(source)
                 crop = crop_png_file(source, template, x=x, y=y, width=width, height=height)
             except (OSError, ImageError, ValueError) as exc:
                 self._write_json(HTTPStatus.BAD_REQUEST, {"ok": False, "messages": [f"Cannot save template: {exc}"]})
                 return
+            messages = [f"Saved template {template}."]
+            messages.extend(_template_quality_messages(crop.width, crop.height, source_image.width, source_image.height, threshold))
+            match_preview = _template_match_preview(source, template, threshold, region=(x, y, width, height))
+            if match_preview is not None:
+                messages.append(f"Checkpoint preview: matched={str(match_preview['matched']).lower()} score={match_preview['score']:.3f}.")
 
             step = {
                 "type": "checkpoint_match",
@@ -361,8 +368,9 @@ def _make_handler(config: RecorderServerConfig):
                     "source_path": source.as_posix(),
                     "width": crop.width,
                     "height": crop.height,
+                    "match_preview": match_preview,
                     "steps": [step],
-                    "messages": [f"Saved template {template}."],
+                    "messages": messages,
                 },
             )
 
@@ -550,6 +558,78 @@ def _default_artifact_root(script_path: Path) -> Path:
     if script_path.parent.name == "scripts":
         return script_path.parent.parent / "artifacts"
     return Path("artifacts")
+
+
+def _calibration_guide_command(config: RecorderServerConfig) -> str | None:
+    if not config.serial:
+        return None
+    parts = [
+        "py",
+        "-m",
+        "autoplay",
+        "calibration",
+        "guide",
+        "--serial",
+        config.serial,
+        "--from-screenshot",
+        config.screenshot_path.as_posix(),
+        "--artifact-root",
+        _default_artifact_root(config.script_path).as_posix(),
+    ]
+    return " ".join(_quote_powershell_arg(part) for part in parts)
+
+
+def _calibration_ui_dict(calibration: CalibrationLoadResult, screenshot_path: Path) -> dict:
+    data = calibration.to_ui_dict()
+    try:
+        screenshot = read_png(screenshot_path)
+    except (OSError, ImageError, ScriptError):
+        return data
+    data["current_screen_width"] = screenshot.width
+    data["current_screen_height"] = screenshot.height
+    # A calibrated scroll distance is only meaningful for the same screen size
+    # assumptions used when the profile was created.
+    if data.get("loaded") and (data.get("screen_width") != screenshot.width or data.get("screen_height") != screenshot.height):
+        warnings = list(data.get("warnings") or [])
+        warnings.append(
+            f"Current screenshot is {screenshot.width}x{screenshot.height}, but calibration profile is {data.get('screen_width')}x{data.get('screen_height')}."
+        )
+        data["warnings"] = warnings
+    return data
+
+
+def _quote_powershell_arg(value: str) -> str:
+    # The recorder displays this command for Windows PowerShell users. Single
+    # quotes keep paths with spaces literal and only require escaping themselves.
+    if not value or any(character.isspace() for character in value) or "'" in value:
+        return "'" + value.replace("'", "''") + "'"
+    return value
+
+
+def _template_quality_messages(template_width: int, template_height: int, source_width: int, source_height: int, threshold: float) -> list[str]:
+    messages: list[str] = []
+    if template_width < 8 or template_height < 8:
+        messages.append("Template quality: very small crop; prefer a stable unique UI element at least 8x8 px.")
+    template_area = template_width * template_height
+    source_area = max(1, source_width * source_height)
+    if template_area / source_area > 0.25:
+        messages.append("Template quality: large crop; smaller stable UI regions are usually more reusable.")
+    if threshold < 0.9:
+        messages.append("Template quality: low threshold; verify it does not match similar UI by accident.")
+    return messages
+
+
+def _template_match_preview(source: Path, template: Path, threshold: float, region: tuple[int, int, int, int]) -> dict | None:
+    try:
+        result = api.match(source, template, threshold=threshold, region=region)
+    except (OSError, ImageError, ScriptError):
+        return None
+    return {
+        "matched": result.matched,
+        "score": round(result.score, 3),
+        "x": result.x,
+        "y": result.y,
+    }
 
 
 def _require_template_output_path(path: Path, artifact_root: Path) -> None:
