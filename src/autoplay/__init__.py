@@ -1,4 +1,4 @@
-"""AutoPlay BlueStacks ADB proof-of-concept package."""
+"""AutoPlay Android emulator ADB automation package."""
 
 __all__ = ["__version__"]
 

@@ -6,7 +6,7 @@ import sys
 from dataclasses import dataclass
 
 from .adb import AdbClient, parse_device_serials
-from .paths import DEFAULT_WINDOWS_ADB, ENV_ADB_PATH, is_wsl, path_exists_for_host, resolve_adb_path
+from .paths import DEFAULT_WINDOWS_ADB, ENV_ADB_PATH, KNOWN_WINDOWS_ADB_PATHS, is_wsl, path_exists_for_host, resolve_adb_path
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,10 @@ def run_doctor(profile_adb_path: str | None = None, serial: str | None = None) -
         ok = False
         lines.append("FAIL: ADB executable was not found.")
         lines.append(f"Default BlueStacks path: {DEFAULT_WINDOWS_ADB}")
-        lines.append(f"Set {ENV_ADB_PATH} to the full HD-Adb.exe path if BlueStacks is installed elsewhere.")
+        lines.append("Known Windows ADB paths:")
+        for candidate in KNOWN_WINDOWS_ADB_PATHS:
+            lines.append(f"  - {candidate}")
+        lines.append(f"Set {ENV_ADB_PATH} to the full adb.exe/HD-Adb.exe path if your emulator is installed elsewhere.")
         return DoctorReport(ok=ok, lines=lines)
 
     adb = AdbClient(adb_path=adb_path, serial=serial)
@@ -53,17 +56,19 @@ def run_doctor(profile_adb_path: str | None = None, serial: str | None = None) -
     serials = parse_device_serials(devices_result.stdout_text())
     if not serials:
         ok = False
-        lines.append("FAIL: No connected BlueStacks/Android device was reported by ADB.")
+        lines.append("FAIL: No connected Android emulator/device was reported by ADB.")
         lines.extend(_adb_help_lines())
         return DoctorReport(ok=ok, lines=lines)
 
     lines.append(f"Connected devices: {', '.join(serials)}")
-    lines.append("OK: BlueStacks ADB looks reachable.")
+    lines.append("OK: Android emulator ADB looks reachable.")
     return DoctorReport(ok=ok, lines=lines)
 
 
 def _adb_help_lines() -> list[str]:
     return [
-        "Open BlueStacks Settings > Advanced and enable Android Debug Bridge.",
+        "Open your emulator settings and enable Android Debug Bridge / ADB debugging.",
+        "For LDPlayer, use its bundled adb.exe if the default BlueStacks HD-Adb.exe cannot see the emulator.",
         r"Then test in Windows PowerShell: cd 'C:\Program Files\BlueStacks_nxt'; .\HD-Adb.exe devices",
+        r"LDPlayer example: cd 'C:\LDPlayer\LDPlayer9'; .\adb.exe devices",
     ]

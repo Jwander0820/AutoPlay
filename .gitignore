@@ -16,12 +16,14 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+tmp*/
 
 # Environment and local config
 .codex
 .env
 .env.*
 !.env.example
+config/*.local.json
 
 # Editor and OS files
 .DS_Store

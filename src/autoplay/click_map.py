@@ -73,6 +73,9 @@ def render_builder_html(
     calibration_guide_command_value = json.dumps(calibration_guide_command)
     allow_device_input_value = json.dumps(allow_device_input)
     profile_value = json.dumps({"adb_path": profile_adb_path, "serial": profile_serial})
+    device_input_label = "裝置輸入：已允許" if allow_device_input else "裝置輸入：關閉"
+    serial_label = f"serial：{profile_serial}" if profile_serial else "serial：未指定"
+    adb_label = f"ADB：{Path(profile_adb_path).name}" if profile_adb_path else "ADB：預設"
     template = """<!doctype html>
 <html lang="zh-Hant">
 <head>
@@ -137,6 +140,64 @@ def render_builder_html(
       gap: 8px;
       align-items: center;
       justify-content: flex-end;
+    }
+    .workflow-rail, .context-strip {
+      display: grid;
+      gap: 8px;
+      padding: 10px 18px;
+      border-bottom: 1px solid var(--line);
+      background: #f9fbfb;
+    }
+    .workflow-rail {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    .workflow-step {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 8px;
+      align-items: center;
+      min-height: 44px;
+      padding: 8px 10px;
+      border: 1px solid #dce6e4;
+      border-radius: 8px;
+      background: #ffffff;
+    }
+    .workflow-step span {
+      display: inline-grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      background: #e5f3ef;
+      color: var(--accent-strong);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .workflow-step strong {
+      display: block;
+      font-size: 13px;
+      line-height: 1.3;
+    }
+    .workflow-step small {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    .context-strip {
+      grid-template-columns: repeat(3, minmax(0, max-content));
+      align-items: center;
+    }
+    .context-chip {
+      min-height: 28px;
+      padding: 5px 9px;
+      border: 1px solid #dce6e4;
+      border-radius: 999px;
+      background: #ffffff;
+      color: #34434a;
+      font-size: 12px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
     }
     button, input {
       font: inherit;
@@ -593,6 +654,9 @@ def render_builder_html(
       .toolstrip {
         grid-template-columns: 1fr;
       }
+      .workflow-rail, .context-strip {
+        grid-template-columns: 1fr 1fr;
+      }
       .image-wrap {
         max-height: 65svh;
       }
@@ -603,6 +667,9 @@ def render_builder_html(
         padding-right: 12px;
       }
       .grid, .segmented {
+        grid-template-columns: 1fr;
+      }
+      .workflow-rail, .context-strip {
         grid-template-columns: 1fr;
       }
     }
@@ -626,6 +693,17 @@ def render_builder_html(
       <button id="clear" type="button" class="ghost">清空</button>
     </div>
   </header>
+  <section class="workflow-rail" aria-label="錄製流程">
+    <div class="workflow-step"><span>1</span><div><strong>連線</strong><small>確認 ADB 與 serial</small></div></div>
+    <div class="workflow-step"><span>2</span><div><strong>擷取</strong><small>取得最新模擬器畫面</small></div></div>
+    <div class="workflow-step"><span>3</span><div><strong>錄製</strong><small>點擊、手勢、等待</small></div></div>
+    <div class="workflow-step"><span>4</span><div><strong>驗證</strong><small>儲存、dry-run、checkpoint</small></div></div>
+  </section>
+  <section class="context-strip" aria-label="執行環境">
+    <span class="context-chip" id="deviceInputState">__DEVICE_INPUT_LABEL__</span>
+    <span class="context-chip" id="serialState">__SERIAL_LABEL__</span>
+    <span class="context-chip" id="adbState">__ADB_LABEL__</span>
+  </section>
   <main class="workspace">
     <section class="stage">
       <div class="stage-head">
@@ -1796,4 +1874,7 @@ def render_builder_html(
         .replace("__CALIBRATION_GUIDE_COMMAND__", calibration_guide_command_value)
         .replace("__ALLOW_DEVICE_INPUT__", allow_device_input_value)
         .replace("__PROFILE__", profile_value)
+        .replace("__DEVICE_INPUT_LABEL__", html.escape(device_input_label))
+        .replace("__SERIAL_LABEL__", html.escape(serial_label))
+        .replace("__ADB_LABEL__", html.escape(adb_label))
     )

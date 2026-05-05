@@ -184,10 +184,10 @@ class _WindowsMouseHook:
     def _client_geometry(self, hwnd) -> ClientGeometry:
         rect = self.wintypes.RECT()
         if not self.user32.GetClientRect(hwnd, self.ctypes.byref(rect)):
-            raise LiveClickRecorderError("Could not read BlueStacks client rectangle.")
+            raise LiveClickRecorderError("Could not read emulator client rectangle.")
         origin = self.POINT(0, 0)
         if not self.user32.ClientToScreen(hwnd, self.ctypes.byref(origin)):
-            raise LiveClickRecorderError("Could not map BlueStacks client origin.")
+            raise LiveClickRecorderError("Could not map emulator client origin.")
         width = rect.right - rect.left
         height = rect.bottom - rect.top
         target_width, target_height = self.target_size or (width, height)

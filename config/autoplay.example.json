@@ -1,0 +1,14 @@
+{
+  "adb_path": "C:\\Path\\To\\LDPlayer\\LDPlayer9\\adb.exe",
+  "allow_device_input": true,
+  "connect_targets": [
+    "127.0.0.1:5555",
+    "127.0.0.1:5557",
+    "127.0.0.1:5559"
+  ],
+  "emulator_profile": "ldplayer",
+  "recorder_port": 0,
+  "screenshot_path": "artifacts/manual/ldplayer-start.png",
+  "script_path": "scripts/ldplayer-test.yml",
+  "serial": ""
+}

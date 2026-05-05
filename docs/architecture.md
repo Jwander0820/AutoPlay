@@ -1,6 +1,6 @@
 # Architecture
 
-AutoPlay is a local-first controller for repeatable mobile game daily tasks. The current target is BlueStacks 5 controlled through ADB.
+AutoPlay is a local-first controller for repeatable mobile game daily tasks. The current target is Android emulators controlled through ADB, with BlueStacks and LDPlayer as the first supported Windows profiles.
 
 ## Components
 
@@ -16,13 +16,13 @@ AutoPlay is a local-first controller for repeatable mobile game daily tasks. The
 ## Data flow
 
 ```text
-YAML script -> parser -> validator -> runner -> ADB client -> BlueStacks
+YAML script -> parser -> validator -> runner -> ADB client -> Android emulator
 ```
 
 Next-stage flow:
 
 ```text
-AI/tool UI/CLI -> core API -> validator/runner/ADB client -> BlueStacks
+AI/tool UI/CLI -> core API -> validator/runner/ADB client -> Android emulator
 ```
 
 Screenshots are written to artifact paths declared by the script. Checkpoints can verify file existence or match a template image against a screenshot.

@@ -6,9 +6,11 @@ This file is the starting point for the next conversation.
 
 Move AutoPlay from a CLI proof of concept into a user-friendly script creation tool with a typed core API that AI agents can call safely.
 
+Longer term, AutoPlay should support local AI conversation: the user can talk to a local AI assistant, the AI can inspect screenshots and call bounded AutoPlay tools, and real emulator input remains opt-in, audited, and reversible through reviewable YAML. The architecture direction is captured in `docs/ai-local-automation-plan.md`.
+
 ## Current state
 
-- BlueStacks ADB control works through `AdbClient`.
+- Android emulator ADB control works through `AdbClient`; BlueStacks and LDPlayer use the same core API surface.
 - CLI commands exist for doctor, screenshot, tap, swipe, drag, scroll, back, calibration, run, validate, and match.
 - YAML DSL supports screenshot, checkpoint_exists, checkpoint_match, wait, tap, swipe, drag, scroll, and back.
 - Runner validates scripts before execution and writes JSON reports with `--report-out`.
@@ -19,9 +21,10 @@ Move AutoPlay from a CLI proof of concept into a user-friendly script creation t
 - `py -m autoplay agent-run <script.yml>` runs scripts through the AI-facing safety session and writes both a runner report and an agent audit log.
 - `py -m autoplay click-map <screenshot.png> --out <page.html>` creates a local browser UI for collecting tap coordinates from screenshots.
 - `py -m autoplay record-ui <script.yml> --screenshot <screen.png>` starts a local recorder UI that saves YAML directly and validates it.
-- `py -m autoplay record-clicks <script.yml>` experimentally records live Windows clicks inside a BlueStacks window into YAML tap steps.
+- `py -m autoplay record-clicks <script.yml>` experimentally records live Windows clicks inside a matching emulator window into YAML tap steps.
 - `record-ui` supports continuous capture and an explicit opt-in Tap + Wait + Capture loop for multi-screen flows.
 - `record-ui` has a Traditional Chinese workspace UI with script-only/device modes, manual/auto wait modes, direct canvas gesture tools, visible calibration status, dry-run/real script test buttons, profile serial preservation, and auto wait-until-screen-stable support for tap and gesture capture.
+- `record-ui` now surfaces execution context and a four-step workflow rail so testers can see connection, capture, recording, and validation state at a glance.
 - Mobile gesture primitives are implemented across ADB, API, YAML, validation, runner, CLI, agent tools, guided recorder, and record-ui: `swipe`, `drag`, `scroll`, and `back`.
 
 ## Stage checkpoint
@@ -35,13 +38,13 @@ The current handoff point is after specs `0014` through `0019`:
 - `calibration guide` is now available as a CLI-first workflow for deriving scroll distances from tester feedback, saving profile JSON, and writing local notes.
 - `record-ui` shows the matching `calibration guide` command when serial context is available.
 - `record-ui` now nudges testers into Template mode after device tap/gesture capture so post-action checkpoints are harder to forget.
-- `docs/stage-report.md` contains the latest stage report, including verification commands and real BlueStacks follow-up.
+- `docs/stage-report.md` contains the latest stage report, including verification commands and real emulator follow-up.
 
 For the next commit or handoff, keep generated screenshots, calibration outputs, reports, audit logs, and personal scripts local under ignored paths such as `artifacts/` and `scripts/`.
 
 ## Proposed next feature
 
-Use the new guided calibration workflow on real BlueStacks profiles, then use those findings to harden recorder gesture behavior and post-gesture verification.
+Use the new guided calibration workflow on the active real emulator profile, then use those findings to harden recorder gesture behavior and post-gesture verification. The current user test target has moved from BlueStacks to LDPlayer.
 
 The completed gesture spec is:
 
@@ -51,7 +54,7 @@ docs/specs/0014-mobile-gestures.md
 
 The next slice should focus on:
 
-1. Real BlueStacks guided calibration for scroll distances and screen dimensions.
+1. Real LDPlayer guided calibration for scroll distances and screen dimensions.
 2. User-test the exact `calibration guide` command shown by `record-ui`, especially Windows path quoting.
 3. User-test the post-action Template nudge after taps and gestures, especially whether cropped templates are stable enough.
 4. User-test the new gesture + capture loop, especially whether waits and screenshot transitions feel predictable enough for daily recording.
@@ -71,16 +74,18 @@ The current recorder can now tap, wait, and author gestures. Real daily tasks st
 - scroll/swipe flows should create checkpoints after movement
 - scripts should fail early when a gesture lands on an unexpected screen
 - future AI calls need bounded choose-next-step behavior, not unrestricted clicking
+- local AI integration should use a callable tool boundary such as MCP or a local JSON bridge; skills remain the instruction layer, not the execution layer
 
 Without calibration and checkpoints, gestures are available but still too coordinate-heavy for robust daily automation.
 
 ## Recommended next implementation order
 
-1. Run `py -m autoplay calibration guide --serial ... --from-screenshot ...` on a real BlueStacks screen and inspect the saved JSON/notes.
+1. Run `py -m autoplay calibration guide --serial ... --from-screenshot ...` on a real LDPlayer screen and inspect the saved JSON/notes.
 2. Confirm the `record-ui` hint works in Windows PowerShell for normal and space-containing paths.
-3. Use a real BlueStacks pass to tune vertical/horizontal defaults, then record the result as local artifacts.
+3. Use a real LDPlayer pass to tune vertical/horizontal defaults, then record the result as local artifacts.
 4. Feed those findings back into checkpoint-after-gesture guidance before starting the bounded decision loop.
-5. Keep adding unit coverage around any new UI/server payload shape before branching recorder state further.
+5. Draft the local AI bridge contract, then expose it through MCP when the target local AI client supports MCP.
+6. Keep adding unit coverage around any new UI/server payload shape before branching recorder state further.
 
 ### Initial gesture semantics
 
@@ -205,4 +210,6 @@ AI-facing tools should call this API rather than shelling out to CLI commands.
 
 `0021-post-action-checkpoint-nudge.md` is implemented as a recorder UI workflow nudge after device actions.
 
-Next, test `calibration guide` results, the record-ui guide command, and template stability on real BlueStacks, then build a bounded decision loop that uses screenshots and template matches to choose the next safe YAML/script step.
+`0022-local-ai-tool-interface.md` is drafted as the bridge contract for local AI and future MCP wrapping.
+
+Next, test `calibration guide` results, the record-ui guide command, and template stability on real LDPlayer, then build a bounded decision loop that uses screenshots and template matches to choose the next safe YAML/script step.

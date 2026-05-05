@@ -29,17 +29,17 @@ from .validation import format_report
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="autoplay", description="BlueStacks ADB POC controller.")
+    parser = argparse.ArgumentParser(prog="autoplay", description="ADB controller for Android emulator automation.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    doctor = subparsers.add_parser("doctor", help="Check BlueStacks ADB readiness.")
-    doctor.add_argument("--adb-path", help="Override HD-Adb.exe path for this check.")
+    doctor = subparsers.add_parser("doctor", help="Check Android emulator ADB readiness.")
+    doctor.add_argument("--adb-path", help="Override adb.exe/HD-Adb.exe path for this check.")
     doctor.add_argument("--serial", help="ADB serial to target.")
     doctor.set_defaults(func=_doctor)
 
     screenshot = subparsers.add_parser("screenshot", help="Capture a PNG screenshot through ADB.")
     screenshot.add_argument("--out", required=True, help="Output PNG path.")
-    screenshot.add_argument("--adb-path", help="Override HD-Adb.exe path.")
+    screenshot.add_argument("--adb-path", help="Override adb.exe/HD-Adb.exe path.")
     screenshot.add_argument("--serial", help="ADB serial to target.")
     screenshot.set_defaults(func=_screenshot)
 
@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     click_map.add_argument("--out", required=True, help="Output HTML path.")
     click_map.add_argument("--script-out", help="Default script filename used by the HTML download button.")
     click_map.add_argument("--capture", action="store_true", help="Capture the screenshot first through ADB.")
-    click_map.add_argument("--adb-path", help="Override HD-Adb.exe path when --capture is used.")
+    click_map.add_argument("--adb-path", help="Override adb.exe/HD-Adb.exe path when --capture is used.")
     click_map.add_argument("--serial", help="ADB serial to target when --capture is used.")
     click_map.set_defaults(func=_click_map)
 
@@ -56,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     tap.add_argument("x", type=int)
     tap.add_argument("y", type=int)
     tap.add_argument("--yes", action="store_true", help="Actually send the tap.")
-    tap.add_argument("--adb-path", help="Override HD-Adb.exe path.")
+    tap.add_argument("--adb-path", help="Override adb.exe/HD-Adb.exe path.")
     tap.add_argument("--serial", help="ADB serial to target.")
     tap.set_defaults(func=_tap)
 
@@ -67,7 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     swipe.add_argument("y2", type=int)
     swipe.add_argument("--duration-ms", type=int, default=300, help="Swipe duration in milliseconds.")
     swipe.add_argument("--yes", action="store_true", help="Actually send the swipe.")
-    swipe.add_argument("--adb-path", help="Override HD-Adb.exe path.")
+    swipe.add_argument("--adb-path", help="Override adb.exe/HD-Adb.exe path.")
     swipe.add_argument("--serial", help="ADB serial to target.")
     swipe.set_defaults(func=_swipe)
 
@@ -78,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     drag.add_argument("y2", type=int)
     drag.add_argument("--duration-ms", type=int, default=700, help="Drag duration in milliseconds.")
     drag.add_argument("--yes", action="store_true", help="Actually send the drag.")
-    drag.add_argument("--adb-path", help="Override HD-Adb.exe path.")
+    drag.add_argument("--adb-path", help="Override adb.exe/HD-Adb.exe path.")
     drag.add_argument("--serial", help="ADB serial to target.")
     drag.set_defaults(func=_drag)
 
@@ -87,7 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
     scroll.add_argument("--distance", type=int, help="Scroll distance in pixels. Defaults to 700.")
     scroll.add_argument("--duration-ms", type=int, default=400, help="Scroll duration in milliseconds.")
     scroll.add_argument("--yes", action="store_true", help="Actually send the scroll.")
-    scroll.add_argument("--adb-path", help="Override HD-Adb.exe path.")
+    scroll.add_argument("--adb-path", help="Override adb.exe/HD-Adb.exe path.")
     scroll.add_argument("--serial", help="ADB serial to target.")
     scroll.add_argument("--calibrated", action="store_true", help="Use the serial calibration profile for distance and screen size.")
     scroll.add_argument("--artifact-root", default="artifacts", help="Root containing calibration profiles when --calibrated is used.")
@@ -95,7 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     back = subparsers.add_parser("back", help="Send Android back through ADB; dry-run unless --yes is passed.")
     back.add_argument("--yes", action="store_true", help="Actually send the back keyevent.")
-    back.add_argument("--adb-path", help="Override HD-Adb.exe path.")
+    back.add_argument("--adb-path", help="Override adb.exe/HD-Adb.exe path.")
     back.add_argument("--serial", help="ADB serial to target.")
     back.set_defaults(func=_back)
 
@@ -128,7 +128,7 @@ def build_parser() -> argparse.ArgumentParser:
     calibration_guide.add_argument("--adjustment", type=int, default=80, help="Pixels to add/subtract when feedback is short or long.")
     calibration_guide.add_argument("--max-rounds", type=int, default=6, help="Maximum feedback rounds per scroll axis.")
     calibration_guide.add_argument("--yes", action="store_true", help="Allow optional one-scroll real tests after an additional prompt.")
-    calibration_guide.add_argument("--adb-path", help="Override HD-Adb.exe path when --yes real tests are confirmed.")
+    calibration_guide.add_argument("--adb-path", help="Override adb.exe/HD-Adb.exe path when --yes real tests are confirmed.")
     calibration_guide.set_defaults(func=_calibration_guide)
 
     run = subparsers.add_parser("run", help="Run an AutoPlay YAML script.")
@@ -159,15 +159,15 @@ def build_parser() -> argparse.ArgumentParser:
     record_ui.add_argument("--capture", action="store_true", help="Capture the screenshot first through ADB.")
     record_ui.add_argument("--host", default="127.0.0.1", help="Host for the local recorder server.")
     record_ui.add_argument("--port", type=int, default=8765, help="Port for the local recorder server.")
-    record_ui.add_argument("--adb-path", help="Override HD-Adb.exe path when --capture is used.")
+    record_ui.add_argument("--adb-path", help="Override adb.exe/HD-Adb.exe path when --capture is used.")
     record_ui.add_argument("--serial", help="ADB serial to target when --capture is used.")
     record_ui.add_argument("--allow-device-input", action="store_true", help="Allow the browser recorder to send taps before refreshing screenshots.")
     record_ui.set_defaults(func=_record_ui)
 
-    record_clicks = subparsers.add_parser("record-clicks", help="Experimentally record live Windows clicks inside a BlueStacks window.")
+    record_clicks = subparsers.add_parser("record-clicks", help="Experimentally record live Windows clicks inside a matching emulator window.")
     record_clicks.add_argument("script", help="Path to YAML script to append tap steps to.")
     record_clicks.add_argument("--screenshot", help="Screenshot PNG used to scale window clicks into ADB coordinates.")
-    record_clicks.add_argument("--window-title", default="BlueStacks", help="Only record clicks from a window whose title contains this text.")
+    record_clicks.add_argument("--window-title", default="BlueStacks", help="Only record clicks from a window whose title contains this text. Use LDPlayer when recording LDPlayer.")
     record_clicks.add_argument("--label-prefix", default="live click", help="Label prefix for appended tap steps.")
     record_clicks.add_argument("--max-clicks", type=int, help="Stop after this many clicks. Otherwise press Ctrl+C.")
     record_clicks.set_defaults(func=_record_clicks)
@@ -181,7 +181,7 @@ def build_parser() -> argparse.ArgumentParser:
     agent_run.add_argument("--intent", default="daily task dry run", help="Short safe intent label for audit logs.")
     agent_run.add_argument("--execute-taps", action="store_true", help="Request real tap and gesture execution.")
     agent_run.add_argument("--allow-device-input", action="store_true", help="Allow real device input when --execute-taps is also set.")
-    agent_run.add_argument("--adb-path", help="Override HD-Adb.exe path for script execution.")
+    agent_run.add_argument("--adb-path", help="Override adb.exe/HD-Adb.exe path for script execution.")
     agent_run.add_argument("--serial", help="ADB serial to target during script execution.")
     agent_run.set_defaults(func=_agent_run)
 
@@ -551,7 +551,7 @@ def _print_device_input_result(context: str, success_message: str, dry_run_messa
 
 def _record_clicks(args: argparse.Namespace) -> int:
     print("Experimental live click recorder. It only writes YAML and never sends taps.")
-    print("Click inside the target BlueStacks window. Press Ctrl+C to stop.")
+    print("Click inside the target emulator window. Press Ctrl+C to stop.")
     clicks = run_windows_live_click_recorder(
         args.script,
         screenshot_path=args.screenshot,

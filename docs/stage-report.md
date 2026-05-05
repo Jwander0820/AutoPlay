@@ -1,5 +1,29 @@
 # Stage Report
 
+## 2026-05-05 - LDPlayer Compatibility Handoff
+
+### Summary
+
+The project has been checked for the emulator switch from BlueStacks to LDPlayer. The core API does not need a rewrite: AutoPlay sends standard ADB commands for screenshots, taps, swipes, drags, scrolls, and back events. The emulator-specific surface is limited to ADB executable discovery, ADB serial selection, gesture calibration profiles, and the experimental Windows live-click recorder window title.
+
+### Completed
+
+- Added common LDPlayer Windows ADB paths to default ADB discovery while preserving `AUTOPLAY_ADB`, `--adb-path`, and profile overrides.
+- Updated doctor output to describe Android emulator/device readiness instead of treating BlueStacks as the only supported target.
+- Updated CLI and architecture handoff wording to make LDPlayer an explicit compatible emulator profile.
+
+### LDPlayer Follow-Up
+
+Use a real LDPlayer session to run:
+
+```powershell
+py -m autoplay doctor --adb-path <LDPlayer adb.exe path>
+py -m autoplay screenshot --out artifacts\manual\ldplayer-start.png --adb-path <LDPlayer adb.exe path> --serial <serial>
+py -m autoplay calibration guide --serial <serial> --from-screenshot artifacts\manual\ldplayer-start.png --adb-path <LDPlayer adb.exe path>
+```
+
+If LDPlayer is installed somewhere else, set `AUTOPLAY_ADB` to its `adb.exe` path or pass `--adb-path` per command.
+
 ## 2026-05-01 - Guided Gesture Calibration
 
 ### Summary

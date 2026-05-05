@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "autoplay"
 version = "0.1.0"
-description = "BlueStacks ADB proof-of-concept runner for safe mobile daily-task automation."
+description = "ADB runner for safe Android emulator daily-task automation."
 readme = "AGENT.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -19,6 +19,7 @@ dev = [
 
 [project.scripts]
 autoplay = "autoplay.cli:main"
+autoplay-dev = "autoplay.dev_launcher:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
