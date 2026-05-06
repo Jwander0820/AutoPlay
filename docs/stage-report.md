@@ -1,5 +1,70 @@
 # Stage Report
 
+## 2026-05-06 - Local AI Toolchain Foundation
+
+### Summary
+
+This stage established the first safe local AI automation toolchain for AutoPlay. The project now has a JSON bridge, local HTTP server, machine-readable schemas, canonical examples, a smoke client, guarded real-input consent codes, and an AI-facing `draft_script` tool for writing reviewable YAML before any emulator action.
+
+The preferred local AI flow is now:
+
+```text
+User intent -> draft_script -> validate -> dry-run run_script -> human review -> guarded real input
+```
+
+### Completed
+
+- Added `src/autoplay/ai_bridge.py` and `py -m autoplay ai-tool` for single JSON tool calls through `AgentSession`.
+- Added `src/autoplay/ai_server.py` and `py -m autoplay ai-server` for local HTTP calls: `/health`, `/tools`, `/schemas`, `/examples`, and `/tool`.
+- Added `src/autoplay/ai_schemas.py` and `py -m autoplay ai-schemas` for machine-readable tool discovery.
+- Added `src/autoplay/ai_examples.py` and `py -m autoplay ai-examples` for safe canonical request examples.
+- Added `src/autoplay/ai_client.py` and `py -m autoplay ai-smoke` for end-to-end local AI server smoke testing.
+- Added session-only `device_input_code` gating for guarded real device input.
+- Added `src/autoplay/ai_script_drafts.py` and `draft_script` so AI clients can write reviewable YAML under `scripts/`, validate immediately, and avoid private `profile.adb_path`.
+- Updated `AGENT.md`, `docs/ai-local-automation-plan.md`, and specs `0022` through `0025`.
+
+### Implemented Specs
+
+- `docs/specs/0022-local-ai-tool-interface.md`
+- `docs/specs/0023-local-ai-client-examples.md`
+- `docs/specs/0024-local-ai-smoke-client.md`
+- `docs/specs/0025-ai-draft-script-tool.md`
+
+### Verification
+
+Commands run:
+
+```powershell
+$env:PYTHONPATH='src;tests'
+& 'D:\venv\AutoPlay\Scripts\python.exe' -m unittest discover -s tests
+git diff --check
+git diff | Select-String -Pattern '<private-path-or-secret-patterns>' -CaseSensitive:$false
+git status --short --ignored config artifacts scripts
+```
+
+Latest result:
+
+- 170 unit tests passed before final documentation updates in this stage.
+- `git diff --check` reported no whitespace errors.
+- The private-path / secret scan returned no matches.
+- `config/autoplay.local.json` and `artifacts/` remain ignored.
+
+### Safety Notes
+
+- AI tools call `AgentSession`, not raw ADB.
+- Device input remains dry-run unless policy and per-call args both opt in.
+- Persistent server real input can require the current `device_input_code`.
+- `draft_script` writes only under `scripts/`, rejects non-YAML extensions, rejects overwrite unless requested, and refuses `profile.adb_path`.
+- User-specific ADB paths remain in ignored local config, not committed files.
+
+### Recommended Next Step
+
+Add a thin MCP wrapper or local chat integration spike that maps MCP/local tool calls onto the existing JSON bridge. Keep the wrapper thin and preserve the current safety chain:
+
+```text
+MCP/local chat -> JSON bridge -> AgentSession -> api.py -> ADB
+```
+
 ## 2026-05-05 - LDPlayer Compatibility Handoff
 
 ### Summary

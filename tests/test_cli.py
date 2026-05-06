@@ -319,6 +319,98 @@ steps:
             self.assertTrue((artifact_root / "reports" / "script-agent-dry-run.json").exists())
             self.assertTrue((artifact_root / "agent" / "script-audit.jsonl").exists())
 
+    def test_ai_tool_runs_json_request_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            request = tmp_path / "request.json"
+            response_out = tmp_path / "response.json"
+            request.write_text(json.dumps({"tool": "tap", "args": {"x": 1, "y": 2}}), encoding="utf-8")
+            bridge = mock.Mock()
+            bridge.handle.return_value = {"ok": True, "tool": "tap", "result": {"dry_run": True}, "messages": []}
+
+            with mock.patch("autoplay.cli.AiBridge.from_local_config", return_value=bridge):
+                self.assertEqual(main(["ai-tool", str(request), "--out", str(response_out), "--artifact-root", str(tmp_path / "artifacts")]), 0)
+
+            bridge.handle.assert_called_once_with({"tool": "tap", "args": {"x": 1, "y": 2}})
+            written = json.loads(response_out.read_text(encoding="utf-8"))
+            self.assertEqual(written["tool"], "tap")
+            self.assertTrue(written["ok"])
+
+    def test_ai_server_starts_and_closes_on_keyboard_interrupt(self):
+        server = mock.Mock()
+        server.serve_forever.side_effect = KeyboardInterrupt()
+        ready = mock.Mock(server=server, url="http://127.0.0.1:8787/")
+
+        with mock.patch("autoplay.cli.create_ai_tool_server", return_value=ready) as create_server, mock.patch("builtins.print"):
+            self.assertEqual(main(["ai-server", "--port", "0", "--artifact-root", "artifacts"]), 0)
+
+        create_server.assert_called_once()
+        config = create_server.call_args.args[0]
+        self.assertEqual(config.port, 0)
+        self.assertEqual(str(config.artifact_root), "artifacts")
+        server.server_close.assert_called_once()
+
+    def test_ai_server_generates_device_input_code_when_real_input_is_enabled(self):
+        server = mock.Mock()
+        server.serve_forever.side_effect = KeyboardInterrupt()
+        ready = mock.Mock(server=server, url="http://127.0.0.1:8787/")
+
+        with (
+            mock.patch("autoplay.cli.create_ai_tool_server", return_value=ready) as create_server,
+            mock.patch("autoplay.cli._generate_device_input_code", return_value="RUN-123"),
+            mock.patch("builtins.print") as printer,
+        ):
+            self.assertEqual(main(["ai-server", "--port", "0", "--allow-device-input"]), 0)
+
+        config = create_server.call_args.args[0]
+        self.assertTrue(config.allow_device_input)
+        self.assertEqual(config.device_input_code, "RUN-123")
+        printed = "\n".join(str(call.args[0]) for call in printer.call_args_list)
+        self.assertIn("Device input code: RUN-123", printed)
+
+    def test_ai_schemas_writes_machine_readable_schema(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "schemas.json"
+
+            self.assertEqual(main(["ai-schemas", "--out", str(out)]), 0)
+
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertTrue(payload["ok"])
+            tools = {tool["name"]: tool for tool in payload["tools"]}
+            self.assertIn("tap", tools)
+            self.assertEqual(tools["tap"]["request_schema"]["properties"]["tool"]["const"], "tap")
+
+    def test_ai_examples_writes_machine_readable_examples(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "examples.json"
+
+            self.assertEqual(main(["ai-examples", "--out", str(out)]), 0)
+
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertTrue(payload["ok"])
+            examples = {example["name"]: example for example in payload["examples"]}
+            self.assertEqual(examples["dry_run_tap"]["request"]["tool"], "tap")
+            self.assertEqual(examples["guarded_real_tap"]["request"]["args"]["device_input_code"], "CODE-SHOWN-IN-LAUNCHER")
+
+    def test_ai_smoke_writes_machine_readable_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "smoke.json"
+            smoke_result = mock.Mock()
+            smoke_result.ok = True
+            smoke_result.to_dict.return_value = {"ok": True, "schema_count": 10, "example_count": 7}
+
+            with mock.patch("autoplay.cli.run_ai_client_smoke", return_value=smoke_result) as smoke:
+                self.assertEqual(main(["ai-smoke", "--base-url", "http://127.0.0.1:8787", "--example", "dry_run_tap", "--out", str(out)]), 0)
+
+            smoke.assert_called_once_with(
+                base_url="http://127.0.0.1:8787",
+                example_name="dry_run_tap",
+                timeout=3.0,
+                allow_real_examples=False,
+            )
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(payload["schema_count"], 10)
+
     def test_screenshot_multiple_devices_prints_serial_hint(self):
         result = AdbResult(command=["adb", "exec-out", "screencap", "-p"], returncode=1, stderr="error: more than one device/emulator")
         doctor_report = mock.Mock(lines=["Connected devices: emulator-5554, 127.0.0.1:5555"])

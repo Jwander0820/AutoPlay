@@ -179,6 +179,22 @@ steps:
                 serial=None,
             )
 
+    def test_draft_script_writes_through_agent_session_and_audit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            script_root = tmp_path / "scripts"
+            audit = tmp_path / "artifacts" / "agent" / "audit.jsonl"
+            session = AgentSession(policy=AgentPolicy(artifact_root=tmp_path / "artifacts", script_root=script_root, audit_path=audit))
+            script = script_root / "ai-draft.yml"
+
+            result = session.draft_script(script, steps=[{"type": "wait", "seconds": 0}])
+
+            self.assertTrue(result.ok)
+            self.assertTrue(script.exists())
+            event = _read_audit(audit)[0]
+            self.assertEqual(event["tool"], "draft_script")
+            self.assertEqual(event["status"], "ok")
+
 
 def _read_audit(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]

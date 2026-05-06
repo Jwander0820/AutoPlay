@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
+import string
 import sys
+from pathlib import Path
 
 from . import api
 from .agent_runner import agent_run_script
 from .agent_tools import SafetyError
+from .ai_bridge import AiBridge
+from .ai_client import AiClientError, run_ai_client_smoke
+from .ai_examples import get_ai_examples_payload
+from .ai_server import AiToolServerConfig, create_ai_tool_server
+from .ai_schemas import get_ai_schema_payload
 from .calibration import (
     CalibrationProfile,
     adjust_scroll_distance,
@@ -172,6 +180,46 @@ def build_parser() -> argparse.ArgumentParser:
     record_clicks.add_argument("--max-clicks", type=int, help="Stop after this many clicks. Otherwise press Ctrl+C.")
     record_clicks.set_defaults(func=_record_clicks)
 
+    ai_tool = subparsers.add_parser("ai-tool", help="Run one local AI JSON tool request through the safety bridge.")
+    ai_tool.add_argument("request", help="JSON request file, or '-' to read from stdin.")
+    ai_tool.add_argument("--out", help="Optional response JSON output path. Defaults to stdout.")
+    ai_tool.add_argument("--artifact-root", default="artifacts", help="Root for screenshots, reports, templates, and audit logs.")
+    ai_tool.add_argument("--audit-out", help="Write the AI bridge audit JSONL here. Defaults under artifact root.")
+    ai_tool.add_argument("--step-budget", type=int, default=20, help="Maximum number of agent tool calls for this bridge session.")
+    ai_tool.add_argument("--allow-device-input", action="store_true", help="Allow real input only when the request also sets args.execute=true.")
+    ai_tool.add_argument("--device-input-code", help="Require this code inside args.device_input_code before real device input is sent.")
+    ai_tool.add_argument("--adb-path", help="Override adb.exe/HD-Adb.exe path. Defaults to ignored local config when present.")
+    ai_tool.add_argument("--serial", help="ADB serial to target. Defaults to ignored local config when present.")
+    ai_tool.set_defaults(func=_ai_tool)
+
+    ai_server = subparsers.add_parser("ai-server", help="Start a local HTTP server for AI JSON tool calls.")
+    ai_server.add_argument("--host", default="127.0.0.1", help="Host for the local AI tool server.")
+    ai_server.add_argument("--port", type=int, default=8787, help="Port for the local AI tool server. Use 0 to choose a free port.")
+    ai_server.add_argument("--artifact-root", default="artifacts", help="Root for screenshots, reports, templates, and audit logs.")
+    ai_server.add_argument("--audit-out", help="Write the AI bridge audit JSONL here. Defaults under artifact root.")
+    ai_server.add_argument("--step-budget", type=int, default=20, help="Maximum number of agent tool calls for this server session.")
+    ai_server.add_argument("--allow-device-input", action="store_true", help="Allow real input only when a request also sets args.execute=true.")
+    ai_server.add_argument("--device-input-code", help="Require this code inside args.device_input_code before real device input is sent. Generated when omitted with --allow-device-input.")
+    ai_server.add_argument("--adb-path", help="Override adb.exe/HD-Adb.exe path. Defaults to ignored local config when present.")
+    ai_server.add_argument("--serial", help="ADB serial to target. Defaults to ignored local config when present.")
+    ai_server.set_defaults(func=_ai_server)
+
+    ai_schemas = subparsers.add_parser("ai-schemas", help="Print machine-readable local AI tool schemas.")
+    ai_schemas.add_argument("--out", help="Optional output JSON path. Defaults to stdout.")
+    ai_schemas.set_defaults(func=_ai_schemas)
+
+    ai_examples = subparsers.add_parser("ai-examples", help="Print machine-readable local AI tool example requests.")
+    ai_examples.add_argument("--out", help="Optional output JSON path. Defaults to stdout.")
+    ai_examples.set_defaults(func=_ai_examples)
+
+    ai_smoke = subparsers.add_parser("ai-smoke", help="Smoke-test a running local AI tool server.")
+    ai_smoke.add_argument("--base-url", default="http://127.0.0.1:8787", help="Base URL for a running ai-server.")
+    ai_smoke.add_argument("--example", help="Optional example request name to POST to /tool, such as dry_run_tap.")
+    ai_smoke.add_argument("--timeout", type=float, default=3.0, help="HTTP timeout in seconds.")
+    ai_smoke.add_argument("--allow-real-examples", action="store_true", help="Allow examples that request real device input.")
+    ai_smoke.add_argument("--out", help="Optional output JSON path. Defaults to stdout.")
+    ai_smoke.set_defaults(func=_ai_smoke)
+
     agent_run = subparsers.add_parser("agent-run", help="Run a script through the AI-facing safety session.")
     agent_run.add_argument("script", help="Path to YAML script.")
     agent_run.add_argument("--artifact-root", default="artifacts", help="Root for reports, screenshots, templates, and audit logs.")
@@ -193,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (RunnerError, SafetyError, LiveClickRecorderError, ScriptError, ImageError, OSError) as exc:
+    except (RunnerError, SafetyError, LiveClickRecorderError, ScriptError, ImageError, AiClientError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
@@ -563,6 +611,94 @@ def _record_clicks(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ai_tool(args: argparse.Namespace) -> int:
+    request_text = sys.stdin.read() if args.request == "-" else _read_text_file(args.request)
+    request = json.loads(request_text)
+    bridge = AiBridge.from_local_config(
+        artifact_root=args.artifact_root,
+        audit_path=args.audit_out,
+        step_budget=args.step_budget,
+        allow_device_input=args.allow_device_input,
+        device_input_code=args.device_input_code,
+        adb_path=args.adb_path,
+        serial=args.serial,
+    )
+    response = bridge.handle(request)
+    response_text = json.dumps(response, indent=2, sort_keys=True) + "\n"
+    if args.out:
+        _write_text_file(args.out, response_text)
+    else:
+        print(response_text, end="")
+    return 0 if response.get("ok") else 1
+
+
+def _ai_server(args: argparse.Namespace) -> int:
+    device_input_code = args.device_input_code
+    if args.allow_device_input and not device_input_code:
+        device_input_code = _generate_device_input_code()
+    ready = create_ai_tool_server(
+        AiToolServerConfig(
+            host=args.host,
+            port=args.port,
+            artifact_root=Path(args.artifact_root),
+            audit_path=Path(args.audit_out) if args.audit_out else None,
+            step_budget=args.step_budget,
+            allow_device_input=args.allow_device_input,
+            device_input_code=device_input_code,
+            adb_path=args.adb_path,
+            serial=args.serial,
+        )
+    )
+    print(f"AI tool server: {ready.url}")
+    if args.allow_device_input:
+        print("Real device input is enabled for this server session.")
+        print(f"Device input code: {device_input_code}")
+        print("Requests must include args.device_input_code with that value and args.execute=true.")
+    else:
+        print("Real device input is disabled; input tools remain dry-run.")
+    print("POST JSON tool requests to /tool. Press Ctrl+C to stop.")
+    try:
+        ready.server.serve_forever()
+    except KeyboardInterrupt:
+        print("AI tool server stopped.")
+    finally:
+        ready.server.server_close()
+    return 0
+
+
+def _ai_schemas(args: argparse.Namespace) -> int:
+    response_text = json.dumps(get_ai_schema_payload(), indent=2, sort_keys=True) + "\n"
+    if args.out:
+        _write_text_file(args.out, response_text)
+    else:
+        print(response_text, end="")
+    return 0
+
+
+def _ai_examples(args: argparse.Namespace) -> int:
+    response_text = json.dumps(get_ai_examples_payload(), indent=2, sort_keys=True) + "\n"
+    if args.out:
+        _write_text_file(args.out, response_text)
+    else:
+        print(response_text, end="")
+    return 0
+
+
+def _ai_smoke(args: argparse.Namespace) -> int:
+    result = run_ai_client_smoke(
+        base_url=args.base_url,
+        example_name=args.example,
+        timeout=args.timeout,
+        allow_real_examples=args.allow_real_examples,
+    )
+    response_text = json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n"
+    if args.out:
+        _write_text_file(args.out, response_text)
+    else:
+        print(response_text, end="")
+    return 0 if result.ok else 1
+
+
 def _agent_run(args: argparse.Namespace) -> int:
     summary = agent_run_script(
         args.script,
@@ -587,6 +723,24 @@ def _agent_run(args: argparse.Namespace) -> int:
     print(f"Report: {summary.report_path}")
     print(f"Audit: {summary.audit_path}")
     return 0
+
+
+def _read_text_file(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as handle:
+        return handle.read()
+
+
+def _write_text_file(path: str, text: str) -> None:
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def _generate_device_input_code(length: int = 12) -> str:
+    alphabet = string.ascii_uppercase + string.digits
+    chooser = random.SystemRandom()
+    return "".join(chooser.choice(alphabet) for _ in range(length))
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ The recommended path is:
 
 1. Keep `src/autoplay/api.py` as the stable Python core.
 2. Keep `src/autoplay/agent_tools.py` as the safety wrapper for AI-facing calls.
-3. Add a small local AI bridge that exposes JSON-style tool calls over the same safety wrapper.
+3. Use `src/autoplay/ai_bridge.py` as the local JSON bridge over the same safety wrapper.
 4. Wrap that bridge as MCP when the target local AI client supports MCP.
 5. Keep the skill as the instruction layer for AI agents that can read repository context.
 
@@ -42,13 +42,50 @@ AI-callable tools should be intentionally small:
 - `screenshot`: capture to an artifact path.
 - `match`: compare screenshot/template regions.
 - `tap`, `swipe`, `drag`, `scroll`, `back`: dry-run by default.
+- `draft_script`: write reviewable YAML under `scripts/` without touching the device.
 - `run_script`: validate and run a YAML script, dry-run by default.
 - `save_plan` or `draft_script`: write reviewable YAML without touching the device.
+
+The first testable execution entrypoint is:
+
+```text
+python -m autoplay ai-tool request.json --artifact-root artifacts
+```
+
+For local AI clients that prefer a persistent process, use:
+
+```text
+python -m autoplay ai-server --host 127.0.0.1 --port 8787
+```
+
+For tool discovery, the same contract is available from:
+
+```text
+python -m autoplay ai-schemas
+GET http://127.0.0.1:8787/schemas
+```
+
+For concrete request examples, use:
+
+```text
+python -m autoplay ai-examples
+GET http://127.0.0.1:8787/examples
+```
+
+For end-to-end local server smoke testing, use:
+
+```text
+python -m autoplay ai-smoke --base-url http://127.0.0.1:8787
+python -m autoplay ai-smoke --example dry_run_tap
+```
+
+This is intentionally wrapper-friendly: a PyCharm Run Configuration, a local chat client, a simple HTTP caller, or a future MCP server can all produce the same JSON request and consume the same JSON response.
 
 Real device input must require all of these:
 
 - local config or session policy allows device input
 - explicit tool argument requests execution
+- current device input code is supplied when one is configured
 - audit log is written
 - step budget remains
 - blocked unsafe intent checks pass

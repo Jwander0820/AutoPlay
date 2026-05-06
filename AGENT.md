@@ -56,9 +56,20 @@ Use the project skill at `skills/autoplay/SKILL.md` when work involves AutoPlay-
 - Experimental Windows live-click recording is available through `py -m autoplay record-clicks <script.yml>` for matching emulator windows.
 - AI-facing automation tools are wrapped by `src/autoplay/agent_tools.py`, which enforces dry-run defaults, step budgets, audit logs, artifact-root checks, and blocked unsafe intents.
 - `py -m autoplay agent-run <script.yml>` is the first user-testable AI automation rail for running validated scripts through the safety wrapper.
+- `src/autoplay/ai_bridge.py` and `py -m autoplay ai-tool <request.json>` provide the first JSON bridge for local AI clients and future MCP wrapping.
+- `py -m autoplay ai-server` exposes the same JSON bridge over local HTTP (`/health`, `/tools`, `/tool`) for early local AI integration before MCP.
+- `src/autoplay/ai_schemas.py`, `py -m autoplay ai-schemas`, and `GET /schemas` expose machine-readable tool schemas so local AI clients can discover arguments before invoking tools.
+- `src/autoplay/ai_examples.py`, `py -m autoplay ai-examples`, and `GET /examples` expose safe canonical request examples for local AI integration.
+- `src/autoplay/ai_client.py` and `py -m autoplay ai-smoke` provide an end-to-end local AI server smoke test for health, schemas, examples, and optional safe example execution.
+- `draft_script` lets AI clients write reviewable YAML drafts under `scripts/` through `AgentSession`, with validation and audit logs, while rejecting private `profile.adb_path`.
+- Real device input through AI bridge/server can require a session-only `device_input_code`; `ai-server --allow-device-input` generates and prints one when omitted.
 
 ## Current stage checkpoint
 
+- This stage completed the first local AI automation toolchain: JSON bridge, local HTTP server, machine-readable schemas, canonical examples, smoke client, guarded real-input consent code, and AI draft-script writing.
+- Local AI clients can now discover tools with `ai-schemas` or `GET /schemas`, inspect examples with `ai-examples` or `GET /examples`, smoke-test a server with `ai-smoke`, call tools with `ai-tool` or `POST /tool`, and write reviewable drafts with `draft_script`.
+- Real device input remains guarded by dry-run defaults, session policy, explicit `execute=true`, optional session-only `device_input_code`, step budget, audit logs, and blocked intent terms.
+- `draft_script` writes only under `scripts/`, validates immediately, refuses private `profile.adb_path`, and is intended as the preferred AI path before any dry-run or real emulator action.
 - This stage completed the gesture-authoring foundation: mobile gestures are supported across the DSL, validation, runner, CLI, API, agent tools, guided recorder, `click-map`, and `record-ui`.
 - `record-ui` can now author tap, swipe, drag, scroll, back, wait, screenshot, and `checkpoint_match` steps from the screenshot workspace.
 - Device-mode recorder flows can execute one tap or supported gesture, wait manually or until screen stability, capture the next screenshot, and append the reviewable YAML sequence.
@@ -90,6 +101,9 @@ Use the project skill at `skills/autoplay/SKILL.md` when work involves AutoPlay-
 - `docs/specs/0020-guided-gesture-calibration.md`: CLI-first workflow for deriving profile values from real emulator tester feedback.
 - `docs/specs/0021-post-action-checkpoint-nudge.md`: record-ui nudge that switches to Template mode after device tap/gesture capture, plus checkpoint preview and template quality hints.
 - `docs/specs/0022-local-ai-tool-interface.md`: local AI JSON bridge and future MCP tool boundary.
+- `docs/specs/0023-local-ai-client-examples.md`: machine-readable local AI example requests.
+- `docs/specs/0024-local-ai-smoke-client.md`: local AI server smoke client for health/schema/example/tool verification.
+- `docs/specs/0025-ai-draft-script-tool.md`: AI-facing tool for writing reviewable YAML drafts under `scripts/`.
 
 ## Next stage direction
 
@@ -105,7 +119,9 @@ Use the project skill at `skills/autoplay/SKILL.md` when work involves AutoPlay-
 - Improve script authoring from "record taps" into "record intent": add template-cropping, checkpoint creation, and screen-change detection after actions.
 - Build a first bounded decision loop that can inspect a screenshot, run template matches, choose the next safe scripted step, and stop for review before any real tap or gesture execution.
 - For local AI conversation, prefer MCP or a local tool server for execution and keep skills as the instruction layer. All tool calls should still pass through `AgentSession` or an equivalent safety wrapper.
-- The next implementation slice should build a small local JSON AI bridge before wrapping it as MCP, so the tool contract can be tested without coupling to one local AI client.
+- The local JSON AI bridge, thin HTTP server, machine-readable tool schemas, canonical examples, smoke client, AI draft-script tool, and real-device input code gate now exist; the next implementation slice should add a small MCP wrapper or a local chat integration spike.
+- Before adding autonomous decision loops, prefer a local chat integration spike that follows this chain: user intent -> `draft_script` -> validate -> dry-run -> human review -> guarded real input.
+- The MCP wrapper should stay thin: MCP tool call -> JSON bridge request -> `AgentSession` -> `api.py`; do not duplicate safety policy in the MCP layer.
 - Keep AI-facing APIs behind the same safety model: dry-run by default, explicit execution flags, validation before device input, step budgets, audit logs, and JSON reports for every run.
 - Do not give AI an unrestricted loop that freely clicks the device. Prefer bounded tool calls, reviewable plans/scripts, and explicit user opt-in for real device input.
 

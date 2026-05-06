@@ -12,6 +12,7 @@ from .doctor import DoctorReport
 from .image_match import MatchResult
 from .runner import RunnerReport
 from .script import BackStep, DragStep, Region, ScriptError, ScrollStep, SwipeStep, TapStep, load_script
+from .ai_script_drafts import DraftScriptResult, draft_script_file
 from .validation import ValidationReport
 
 
@@ -62,6 +63,7 @@ class AgentPolicy:
     allow_device_input: bool = False
     require_artifacts: bool = True
     artifact_root: Path = Path("artifacts")
+    script_root: Path = Path("scripts")
     audit_path: Path = Path("artifacts/agent/audit.jsonl")
     blocked_terms: tuple[str, ...] = BLOCKED_INTENT_TERMS
 
@@ -191,6 +193,33 @@ class AgentSession:
 
     def validate(self, script_path: str | Path) -> ValidationReport:
         return self._call("validate", {"script_path": str(script_path)}, lambda: api.validate(script_path))
+
+    def draft_script(
+        self,
+        script_path: str | Path,
+        steps: list[dict[str, Any]] | None = None,
+        yaml_text: str | None = None,
+        profile: dict[str, Any] | None = None,
+        overwrite: bool = False,
+    ) -> DraftScriptResult:
+        metadata = {
+            "script_path": str(script_path),
+            "step_count": len(steps) if isinstance(steps, list) else None,
+            "yaml": bool(yaml_text),
+            "overwrite": overwrite,
+        }
+        return self._call(
+            "draft_script",
+            metadata,
+            lambda: draft_script_file(
+                script_path,
+                steps=steps,
+                yaml_text=yaml_text,
+                profile=profile,
+                overwrite=overwrite,
+                script_root=self.policy.script_root,
+            ),
+        )
 
     def run(self, script_path: str | Path, execute_taps: bool = False, report_out: str | Path | None = None, intent: str = "") -> RunnerReport:
         metadata = {"script_path": str(script_path), "execute_taps": execute_taps, "report_out": _optional_path(report_out), "intent": intent}
@@ -356,6 +385,8 @@ def _result_to_metadata(result: Any) -> dict[str, Any]:
         return {"ok": result.ok, "errors": len(result.errors), "warnings": len(result.warnings)}
     if isinstance(result, DoctorReport):
         return {"ok": result.ok}
+    if isinstance(result, DraftScriptResult):
+        return {"ok": result.ok, "script_path": str(result.script_path), "step_count": result.step_count}
     return {}
 
 
