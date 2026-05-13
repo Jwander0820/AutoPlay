@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from .ai_adapter import get_ai_adapter_payload, handle_adapter_call
 from .ai_bridge import SUPPORTED_TOOLS, AiBridge
 from .ai_examples import get_ai_examples_payload
 from .ai_schemas import SCHEMA_VERSION, get_ai_schema_payload
@@ -80,16 +81,19 @@ def _make_handler(config: AiToolServerConfig):
             if self.path in {"/examples", "/example-requests"}:
                 self._write_json(HTTPStatus.OK, get_ai_examples_payload())
                 return
+            if self.path in {"/adapter", "/mcp/tools"}:
+                self._write_json(HTTPStatus.OK, get_ai_adapter_payload())
+                return
             self._write_json(HTTPStatus.NOT_FOUND, {"ok": False, "messages": ["Not found."]})
 
         def do_POST(self) -> None:
-            if self.path not in {"/tool", "/api/tool"}:
+            if self.path not in {"/tool", "/api/tool", "/mcp/call"}:
                 self._write_json(HTTPStatus.NOT_FOUND, {"ok": False, "messages": ["Not found."]})
                 return
             payload = self._read_json_payload()
             if payload is None:
                 return
-            response = bridge.handle(payload)
+            response = _handle_post_tool(payload)
             self._write_json(HTTPStatus.OK, response)
 
         def log_message(self, format: str, *args: Any) -> None:
@@ -122,5 +126,14 @@ def _make_handler(config: AiToolServerConfig):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+    def _handle_post_tool(payload: dict[str, Any]) -> dict[str, Any]:
+        if "name" in payload or "arguments" in payload:
+            try:
+                arguments = payload["arguments"] if "arguments" in payload else {}
+                return handle_adapter_call(bridge, str(payload.get("name") or ""), arguments)
+            except Exception as exc:
+                return {"ok": False, "tool": None, "result": {}, "messages": [str(exc)], "steps_remaining": bridge.session.steps_remaining}
+        return bridge.handle(payload)
 
     return AiToolHandler

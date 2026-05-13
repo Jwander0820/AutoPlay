@@ -72,6 +72,28 @@ python -m autoplay ai-examples
 GET http://127.0.0.1:8787/examples
 ```
 
+For MCP/local-client style tool metadata and adapter calls, use:
+
+```text
+python -m autoplay ai-adapter
+GET http://127.0.0.1:8787/adapter
+GET http://127.0.0.1:8787/mcp/tools
+POST http://127.0.0.1:8787/mcp/call
+```
+
+For MCP clients that launch tools over stdio, use:
+
+```text
+python -m autoplay ai-mcp-stdio
+```
+
+For a quick in-memory MCP stdio smoke test, use:
+
+```text
+python -m autoplay ai-mcp-smoke
+python -m autoplay ai-mcp-smoke --example dry_run_tap
+```
+
 For end-to-end local server smoke testing, use:
 
 ```text

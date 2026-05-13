@@ -10,9 +10,12 @@ from pathlib import Path
 from . import api
 from .agent_runner import agent_run_script
 from .agent_tools import SafetyError
+from .ai_adapter import get_ai_adapter_payload
 from .ai_bridge import AiBridge
 from .ai_client import AiClientError, run_ai_client_smoke
 from .ai_examples import get_ai_examples_payload
+from .ai_mcp import McpStdioConfig, run_mcp_stdio
+from .ai_mcp_client import AiMcpSmokeError, run_ai_mcp_smoke
 from .ai_server import AiToolServerConfig, create_ai_tool_server
 from .ai_schemas import get_ai_schema_payload
 from .calibration import (
@@ -212,6 +215,34 @@ def build_parser() -> argparse.ArgumentParser:
     ai_examples.add_argument("--out", help="Optional output JSON path. Defaults to stdout.")
     ai_examples.set_defaults(func=_ai_examples)
 
+    ai_adapter = subparsers.add_parser("ai-adapter", help="Print MCP/local-client adapter tool metadata.")
+    ai_adapter.add_argument("--prefix-names", action="store_true", help="Prefix tool names with autoplay. for clients that share a tool namespace.")
+    ai_adapter.add_argument("--out", help="Optional output JSON path. Defaults to stdout.")
+    ai_adapter.set_defaults(func=_ai_adapter)
+
+    ai_mcp_stdio = subparsers.add_parser("ai-mcp-stdio", help="Run a minimal MCP stdio server over the AI bridge.")
+    ai_mcp_stdio.add_argument("--artifact-root", default="artifacts", help="Root for screenshots, reports, templates, and audit logs.")
+    ai_mcp_stdio.add_argument("--audit-out", help="Write the AI bridge audit JSONL here. Defaults under artifact root.")
+    ai_mcp_stdio.add_argument("--step-budget", type=int, default=20, help="Maximum number of agent tool calls for this MCP session.")
+    ai_mcp_stdio.add_argument("--allow-device-input", action="store_true", help="Allow real input only when requests also set execute=true.")
+    ai_mcp_stdio.add_argument("--device-input-code", help="Require this code inside tool arguments before real device input is sent.")
+    ai_mcp_stdio.add_argument("--adb-path", help="Override adb.exe/HD-Adb.exe path. Defaults to ignored local config when present.")
+    ai_mcp_stdio.add_argument("--serial", help="ADB serial to target. Defaults to ignored local config when present.")
+    ai_mcp_stdio.set_defaults(func=_ai_mcp_stdio)
+
+    ai_mcp_smoke = subparsers.add_parser("ai-mcp-smoke", help="Smoke-test the local MCP stdio server in memory.")
+    ai_mcp_smoke.add_argument("--example", help="Optional safe example request name to run through MCP tools/call, such as dry_run_tap.")
+    ai_mcp_smoke.add_argument("--allow-real-examples", action="store_true", help="Allow examples that request real device input.")
+    ai_mcp_smoke.add_argument("--artifact-root", default="artifacts", help="Root for screenshots, reports, templates, and audit logs.")
+    ai_mcp_smoke.add_argument("--audit-out", help="Write the AI bridge audit JSONL here. Defaults under artifact root.")
+    ai_mcp_smoke.add_argument("--step-budget", type=int, default=20, help="Maximum number of agent tool calls for this smoke session.")
+    ai_mcp_smoke.add_argument("--allow-device-input", action="store_true", help="Allow real input only when requests also set execute=true.")
+    ai_mcp_smoke.add_argument("--device-input-code", help="Require this code inside tool arguments before real device input is sent.")
+    ai_mcp_smoke.add_argument("--adb-path", help="Override adb.exe/HD-Adb.exe path. Defaults to ignored local config when present.")
+    ai_mcp_smoke.add_argument("--serial", help="ADB serial to target. Defaults to ignored local config when present.")
+    ai_mcp_smoke.add_argument("--out", help="Optional output JSON path. Defaults to stdout.")
+    ai_mcp_smoke.set_defaults(func=_ai_mcp_smoke)
+
     ai_smoke = subparsers.add_parser("ai-smoke", help="Smoke-test a running local AI tool server.")
     ai_smoke.add_argument("--base-url", default="http://127.0.0.1:8787", help="Base URL for a running ai-server.")
     ai_smoke.add_argument("--example", help="Optional example request name to POST to /tool, such as dry_run_tap.")
@@ -241,7 +272,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (RunnerError, SafetyError, LiveClickRecorderError, ScriptError, ImageError, AiClientError, OSError) as exc:
+    except (RunnerError, SafetyError, LiveClickRecorderError, ScriptError, ImageError, AiClientError, AiMcpSmokeError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
@@ -682,6 +713,51 @@ def _ai_examples(args: argparse.Namespace) -> int:
     else:
         print(response_text, end="")
     return 0
+
+
+def _ai_adapter(args: argparse.Namespace) -> int:
+    response_text = json.dumps(get_ai_adapter_payload(prefix_names=args.prefix_names), indent=2, sort_keys=True) + "\n"
+    if args.out:
+        _write_text_file(args.out, response_text)
+    else:
+        print(response_text, end="")
+    return 0
+
+
+def _ai_mcp_stdio(args: argparse.Namespace) -> int:
+    return run_mcp_stdio(
+        McpStdioConfig(
+            artifact_root=Path(args.artifact_root),
+            audit_path=Path(args.audit_out) if args.audit_out else None,
+            step_budget=args.step_budget,
+            allow_device_input=args.allow_device_input,
+            device_input_code=args.device_input_code,
+            adb_path=args.adb_path,
+            serial=args.serial,
+        )
+    )
+
+
+def _ai_mcp_smoke(args: argparse.Namespace) -> int:
+    result = run_ai_mcp_smoke(
+        McpStdioConfig(
+            artifact_root=Path(args.artifact_root),
+            audit_path=Path(args.audit_out) if args.audit_out else None,
+            step_budget=args.step_budget,
+            allow_device_input=args.allow_device_input,
+            device_input_code=args.device_input_code,
+            adb_path=args.adb_path,
+            serial=args.serial,
+        ),
+        example_name=args.example,
+        allow_real_examples=args.allow_real_examples,
+    )
+    response_text = json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n"
+    if args.out:
+        _write_text_file(args.out, response_text)
+    else:
+        print(response_text, end="")
+    return 0 if result.ok else 1
 
 
 def _ai_smoke(args: argparse.Namespace) -> int:

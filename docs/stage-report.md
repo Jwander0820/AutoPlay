@@ -65,6 +65,32 @@ Add a thin MCP wrapper or local chat integration spike that maps MCP/local tool 
 MCP/local chat -> JSON bridge -> AgentSession -> api.py -> ADB
 ```
 
+## 2026-05-13 - Local AI Adapter Manifest
+
+### Summary
+
+This stage added a dependency-free adapter layer, minimal MCP stdio server, and MCP smoke client for local AI clients that want MCP-style tool metadata and `tools/call` access.
+
+### Completed
+
+- Added `src/autoplay/ai_adapter.py` to derive adapter tool metadata from `ai_schemas`.
+- Added `py -m autoplay ai-adapter` for writing a machine-readable manifest.
+- Added `GET /adapter` and `GET /mcp/tools` to expose the adapter manifest through `ai-server`.
+- Added `POST /mcp/call` to map adapter calls onto the existing AI bridge request shape.
+- Added `src/autoplay/ai_mcp.py` and `py -m autoplay ai-mcp-stdio` for newline-delimited MCP JSON-RPC over stdin/stdout.
+- Added `src/autoplay/ai_mcp_client.py` and `py -m autoplay ai-mcp-smoke` for in-memory MCP initialize/tool-list/example smoke testing.
+- Added specs `0026-local-ai-adapter-manifest.md`, `0027-mcp-stdio-tool-server.md`, and `0028-mcp-smoke-client.md`, plus tests for adapter, MCP, CLI, and HTTP behavior.
+
+### Safety Notes
+
+- The adapter does not call ADB or project APIs directly.
+- Adapter, MCP, and MCP smoke calls still route through `AiBridge -> AgentSession -> api.py`.
+- Real device input remains guarded by the same `allow_device_input`, `execute=true`, audit, budget, blocked-intent, and optional `device_input_code` checks.
+
+### Recommended Next Step
+
+Add a local chat integration on top of `ai-mcp-stdio` or the HTTP bridge. Keep it as transport glue only, with no duplicated safety policy.
+
 ## 2026-05-05 - LDPlayer Compatibility Handoff
 
 ### Summary

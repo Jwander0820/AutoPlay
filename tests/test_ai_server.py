@@ -20,6 +20,7 @@ class AiServerTest(unittest.TestCase):
             tools = _get_json(ready.url + "tools")
             schemas = _get_json(ready.url + "schemas")
             examples = _get_json(ready.url + "examples")
+            adapter = _get_json(ready.url + "adapter")
         finally:
             ready.server.shutdown()
             ready.server.server_close()
@@ -36,6 +37,9 @@ class AiServerTest(unittest.TestCase):
         example_names = [example["name"] for example in examples["examples"]]
         self.assertIn("dry_run_tap", example_names)
         self.assertIn("guarded_real_tap", example_names)
+        adapter_names = [tool["name"] for tool in adapter["tools"]]
+        self.assertIn("tap", adapter_names)
+        self.assertIn("inputSchema", adapter["tools"][0])
 
     def test_tool_endpoint_runs_request_through_bridge(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -55,6 +59,36 @@ class AiServerTest(unittest.TestCase):
             self.assertEqual(response["tool"], "tap")
             self.assertTrue(response["result"]["dry_run"])
             self.assertTrue((root / "agent" / "ai-bridge.jsonl").exists())
+
+    def test_adapter_call_endpoint_runs_request_through_bridge(self):
+        ready = create_ai_tool_server(AiToolServerConfig(port=0))
+        thread = threading.Thread(target=ready.server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with mock.patch("autoplay.api.tap", return_value=AdbResult(command=["adb", "tap"], returncode=0, dry_run=True)):
+                response = _post_json(ready.url + "mcp/call", {"name": "autoplay.tap", "arguments": {"x": 1, "y": 2}})
+        finally:
+            ready.server.shutdown()
+            ready.server.server_close()
+            thread.join(timeout=2)
+
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["tool"], "tap")
+        self.assertTrue(response["result"]["dry_run"])
+
+    def test_adapter_call_endpoint_rejects_non_object_arguments(self):
+        ready = create_ai_tool_server(AiToolServerConfig(port=0))
+        thread = threading.Thread(target=ready.server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            response = _post_json(ready.url + "mcp/call", {"name": "autoplay.tap", "arguments": []})
+        finally:
+            ready.server.shutdown()
+            ready.server.server_close()
+            thread.join(timeout=2)
+
+        self.assertFalse(response["ok"])
+        self.assertIn("arguments must be a JSON object", response["messages"][0])
 
     def test_real_input_still_requires_explicit_server_policy(self):
         ready = create_ai_tool_server(AiToolServerConfig(port=0, allow_device_input=False))

@@ -392,6 +392,44 @@ steps:
             self.assertEqual(examples["dry_run_tap"]["request"]["tool"], "tap")
             self.assertEqual(examples["guarded_real_tap"]["request"]["args"]["device_input_code"], "CODE-SHOWN-IN-LAUNCHER")
 
+    def test_ai_adapter_writes_machine_readable_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "adapter.json"
+
+            self.assertEqual(main(["ai-adapter", "--prefix-names", "--out", str(out)]), 0)
+
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertTrue(payload["ok"])
+            tools = {tool["name"]: tool for tool in payload["tools"]}
+            self.assertIn("autoplay.tap", tools)
+            self.assertEqual(tools["autoplay.tap"]["bridge_request"]["tool"], "tap")
+            self.assertIn("inputSchema", tools["autoplay.tap"])
+
+    def test_ai_mcp_stdio_delegates_to_stdio_server(self):
+        with mock.patch("autoplay.cli.run_mcp_stdio", return_value=0) as server:
+            self.assertEqual(main(["ai-mcp-stdio", "--artifact-root", "artifacts", "--step-budget", "3"]), 0)
+
+        config = server.call_args.args[0]
+        self.assertEqual(str(config.artifact_root), "artifacts")
+        self.assertEqual(config.step_budget, 3)
+
+    def test_ai_mcp_smoke_writes_machine_readable_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "mcp-smoke.json"
+            smoke_result = mock.Mock()
+            smoke_result.ok = True
+            smoke_result.to_dict.return_value = {"ok": True, "protocol_version": "2025-11-25", "tool_count": 10}
+
+            with mock.patch("autoplay.cli.run_ai_mcp_smoke", return_value=smoke_result) as smoke:
+                self.assertEqual(main(["ai-mcp-smoke", "--example", "dry_run_tap", "--out", str(out)]), 0)
+
+            config = smoke.call_args.args[0]
+            self.assertEqual(str(config.artifact_root), "artifacts")
+            self.assertEqual(smoke.call_args.kwargs["example_name"], "dry_run_tap")
+            self.assertFalse(smoke.call_args.kwargs["allow_real_examples"])
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(payload["protocol_version"], "2025-11-25")
+
     def test_ai_smoke_writes_machine_readable_result(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "smoke.json"
