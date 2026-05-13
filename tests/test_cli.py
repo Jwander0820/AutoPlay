@@ -392,6 +392,69 @@ steps:
             self.assertEqual(examples["dry_run_tap"]["request"]["tool"], "tap")
             self.assertEqual(examples["guarded_real_tap"]["request"]["args"]["device_input_code"], "CODE-SHOWN-IN-LAUNCHER")
 
+    def test_ai_chat_writes_machine_readable_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "chat.json"
+            transcript = Path(tmp) / "transcript.json"
+            chat_result = mock.Mock()
+            chat_result.ok = True
+            chat_result.transcript = [{"type": "request"}]
+            chat_result.to_dict.return_value = {"ok": True, "provider": "ollama", "final_message": "done", "transcript": chat_result.transcript}
+
+            with (
+                mock.patch("autoplay.cli.AiBridge.from_local_config", return_value=mock.Mock()) as bridge,
+                mock.patch("autoplay.cli.run_ai_chat", return_value=chat_result) as chat,
+            ):
+                self.assertEqual(
+                    main(
+                        [
+                            "ai-chat",
+                            "--provider",
+                            "lm-studio",
+                            "--model",
+                            "llama3.1",
+                            "--prompt",
+                            "draft a script",
+                            "--tool",
+                            "draft_script",
+                            "--transcript-out",
+                            str(transcript),
+                            "--out",
+                            str(out),
+                        ]
+                    ),
+                    0,
+                )
+
+            self.assertEqual(chat.call_args.args[0], "draft a script")
+            self.assertEqual(chat.call_args.args[1].provider, "lm-studio")
+            self.assertEqual(chat.call_args.args[1].allowed_tools, ("draft_script",))
+            bridge.assert_called_once()
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(payload["provider"], "ollama")
+            transcript_payload = json.loads(transcript.read_text(encoding="utf-8"))
+            self.assertEqual(transcript_payload["transcript"], [{"type": "request"}])
+
+    def test_ai_chat_smoke_writes_machine_readable_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "chat-smoke.json"
+            transcript = Path(tmp) / "chat-smoke-transcript.json"
+            chat_result = mock.Mock()
+            chat_result.ok = True
+            chat_result.transcript = [{"type": "request", "tools": ["draft_script"]}]
+            chat_result.to_dict.return_value = {"ok": True, "provider": "fake", "final_message": "done", "transcript": chat_result.transcript}
+
+            with mock.patch("autoplay.cli.run_ai_chat", return_value=chat_result) as chat:
+                self.assertEqual(main(["ai-chat-smoke", "--out", str(out), "--transcript-out", str(transcript)]), 0)
+
+            self.assertEqual(chat.call_args.args[1].provider, "fake")
+            self.assertEqual(chat.call_args.args[1].model, "draft_script")
+            self.assertEqual(chat.call_args.args[1].allowed_tools, ("draft_script", "validate"))
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(payload["provider"], "fake")
+            transcript_payload = json.loads(transcript.read_text(encoding="utf-8"))
+            self.assertEqual(transcript_payload["transcript"][0]["tools"], ["draft_script"])
+
     def test_ai_adapter_writes_machine_readable_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "adapter.json"

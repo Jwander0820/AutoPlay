@@ -94,6 +94,19 @@ python -m autoplay ai-mcp-smoke
 python -m autoplay ai-mcp-smoke --example dry_run_tap
 ```
 
+For a provider-backed chat loop, use one of:
+
+```text
+python -m autoplay ai-chat --provider ollama --model <ollama-model> --prompt "Draft a safe daily-task script."
+python -m autoplay ai-chat --provider lmstudio --model <loaded-model-id> --prompt "Validate scripts/daily.yml."
+python -m autoplay ai-chat --provider openai --model <openai-model> --prompt "Draft a safe daily-task script."
+```
+
+OpenAI reads `OPENAI_API_KEY` unless `--api-key` is supplied. LM Studio defaults to `http://127.0.0.1:1234/v1`; Ollama defaults to `http://127.0.0.1:11434`.
+`--base-url` can point either to the service root or to the full chat endpoint. LM Studio can be written as `lmstudio` or `lm-studio`.
+Use repeated `--tool <name>` flags to limit what a provider can see and call, and `--transcript-out <path>` to write a sanitized debug transcript.
+Use `python -m autoplay ai-chat-smoke` to verify the provider chat tool loop without starting Ollama, LM Studio, or calling OpenAI.
+
 For end-to-end local server smoke testing, use:
 
 ```text

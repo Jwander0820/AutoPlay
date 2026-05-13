@@ -1,5 +1,45 @@
 # AutoPlay
 
+## 2026-05-14 Local AI Provider Chat Stage
+
+This stage makes AutoPlay usable from local and hosted chat models while keeping the existing safety bridge as the only execution path.
+
+Completed AI integration entrypoints:
+
+- `py -m autoplay ai-chat --provider ollama --model <model> --prompt "..."`
+- `py -m autoplay ai-chat --provider lmstudio --model <loaded-model> --prompt "..."`
+- `py -m autoplay ai-chat --provider openai --model <model> --prompt "..."`
+- `py -m autoplay ai-chat-smoke`
+- `py -m autoplay ai-mcp-stdio`
+- `py -m autoplay ai-mcp-smoke`
+
+Provider defaults:
+
+- Ollama: `http://127.0.0.1:11434/api/chat`
+- LM Studio: `http://127.0.0.1:1234/v1/chat/completions`
+- OpenAI: `https://api.openai.com/v1/chat/completions`, using `OPENAI_API_KEY` unless `--api-key` is supplied
+
+Safety model:
+
+- Chat model tool calls still route through `AiBridge -> AgentSession -> api.py`.
+- Real device input remains blocked unless the session allows it, the tool call sets `execute=true`, and a configured `device_input_code` matches.
+- Use repeated `--tool <name>` flags to limit which AutoPlay tools the model can see and call.
+- Use `--transcript-out <path>` to write a sanitized debug transcript.
+- Sanitized transcripts redact local command paths and absolute local file paths.
+
+Offline smoke test:
+
+```powershell
+py -m autoplay ai-chat-smoke --artifact-root artifacts\ai-chat-smoke --out artifacts\ai-chat-smoke\result.json --transcript-out artifacts\ai-chat-smoke\transcript.json
+```
+
+Recommended first real-provider tests:
+
+```powershell
+py -m autoplay ai-chat --provider ollama --model <ollama-model> --prompt "Draft a wait-only reviewable script." --tool draft_script --transcript-out artifacts\ai-chat\ollama-transcript.json
+py -m autoplay ai-chat --provider lmstudio --model <loaded-model> --prompt "Validate scripts\example.yml." --tool validate --transcript-out artifacts\ai-chat\lmstudio-transcript.json
+```
+
 AutoPlay 是一個以 BlueStacks / Android Emulator 為起點的本機自動化工具。現在的目標是先讓使用者能用 Web UI 半自動錄製每日任務腳本，再逐步加入畫面判斷、checkpoint 與 AI 輔助決策。
 
 目前已支援：

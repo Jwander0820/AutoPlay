@@ -65,11 +65,11 @@ Add a thin MCP wrapper or local chat integration spike that maps MCP/local tool 
 MCP/local chat -> JSON bridge -> AgentSession -> api.py -> ADB
 ```
 
-## 2026-05-13 - Local AI Adapter Manifest
+## 2026-05-14 - MCP And Provider Chat Foundation
 
 ### Summary
 
-This stage added a dependency-free adapter layer, minimal MCP stdio server, and MCP smoke client for local AI clients that want MCP-style tool metadata and `tools/call` access.
+This stage added a dependency-free adapter layer, minimal MCP stdio server, MCP smoke client, and provider-backed chat loop for local AI clients that want MCP-style tool metadata or direct Ollama/LM Studio/OpenAI API access.
 
 ### Completed
 
@@ -79,17 +79,42 @@ This stage added a dependency-free adapter layer, minimal MCP stdio server, and 
 - Added `POST /mcp/call` to map adapter calls onto the existing AI bridge request shape.
 - Added `src/autoplay/ai_mcp.py` and `py -m autoplay ai-mcp-stdio` for newline-delimited MCP JSON-RPC over stdin/stdout.
 - Added `src/autoplay/ai_mcp_client.py` and `py -m autoplay ai-mcp-smoke` for in-memory MCP initialize/tool-list/example smoke testing.
-- Added specs `0026-local-ai-adapter-manifest.md`, `0027-mcp-stdio-tool-server.md`, and `0028-mcp-smoke-client.md`, plus tests for adapter, MCP, CLI, and HTTP behavior.
+- Added `src/autoplay/ai_chat.py`, `py -m autoplay ai-chat`, and `py -m autoplay ai-chat-smoke` for Ollama, LM Studio, and OpenAI chat completions with AutoPlay tool calling, a fake-provider smoke path, endpoint normalization, provider aliases, tool allowlists, sanitized transcripts, tool-call limits, and malformed argument diagnostics.
+- Added specs `0026-local-ai-adapter-manifest.md`, `0027-mcp-stdio-tool-server.md`, `0028-mcp-smoke-client.md`, and `0029-local-ai-provider-chat.md`, plus tests for adapter, MCP, provider chat, CLI, and HTTP behavior.
 
 ### Safety Notes
 
 - The adapter does not call ADB or project APIs directly.
-- Adapter, MCP, and MCP smoke calls still route through `AiBridge -> AgentSession -> api.py`.
+- Adapter, MCP, MCP smoke, and provider chat tool calls still route through `AiBridge -> AgentSession -> api.py`.
+- Tool results sent back to chat providers redact local command paths before the next model turn.
+- `ai-chat --tool` can restrict the provider-visible tool set, and disallowed tool calls are rejected before `AiBridge`.
+- `ai-chat --transcript-out` writes a sanitized transcript for debugging without exposing local command paths or absolute local file paths.
+- `ai-chat-smoke` verifies provider-chat tool-loop behavior without external model servers or hosted APIs.
+- LM Studio does not receive a fake Authorization header when no API key is configured.
 - Real device input remains guarded by the same `allow_device_input`, `execute=true`, audit, budget, blocked-intent, and optional `device_input_code` checks.
+- Provider API keys are runtime-only through CLI args or environment variables and are not written into tracked examples.
+
+### Verification
+
+Commands run:
+
+```powershell
+$env:PYTHONPATH='src;tests;<pyyaml-site-packages>'
+<python> -m unittest discover -s tests
+git diff --check
+py -m autoplay ai-chat-smoke --artifact-root artifacts\ai-chat-smoke --out artifacts\ai-chat-smoke\result.json --transcript-out artifacts\ai-chat-smoke\transcript.json
+```
+
+Latest result:
+
+- 212 unit tests passed.
+- `git diff --check` reported no whitespace errors.
+- `ai-chat-smoke` completed through the fake-provider path and wrote a wait-only draft under ignored artifacts.
+- The smoke transcript was checked for absolute local path leakage.
 
 ### Recommended Next Step
 
-Add a local chat integration on top of `ai-mcp-stdio` or the HTTP bridge. Keep it as transport glue only, with no duplicated safety policy.
+Follow `docs/next-provider-chat-plan.md`: manually test `ai-chat` against running Ollama and LM Studio servers, then improve provider setup diagnostics before enabling any real device-input chat workflow.
 
 ## 2026-05-05 - LDPlayer Compatibility Handoff
 

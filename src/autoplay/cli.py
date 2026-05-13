@@ -12,6 +12,7 @@ from .agent_runner import agent_run_script
 from .agent_tools import SafetyError
 from .ai_adapter import get_ai_adapter_payload
 from .ai_bridge import AiBridge
+from .ai_chat import AiChatConfig, AiChatError, run_ai_chat
 from .ai_client import AiClientError, run_ai_client_smoke
 from .ai_examples import get_ai_examples_payload
 from .ai_mcp import McpStdioConfig, run_mcp_stdio
@@ -215,6 +216,35 @@ def build_parser() -> argparse.ArgumentParser:
     ai_examples.add_argument("--out", help="Optional output JSON path. Defaults to stdout.")
     ai_examples.set_defaults(func=_ai_examples)
 
+    ai_chat = subparsers.add_parser("ai-chat", help="Ask a local/OpenAI chat model to use AutoPlay tools through the safety bridge.")
+    ai_chat.add_argument("--provider", choices=["ollama", "lmstudio", "lm-studio", "openai"], required=True, help="Chat provider API to call.")
+    ai_chat.add_argument("--model", required=True, help="Model name for the selected provider.")
+    ai_chat.add_argument("--prompt", required=True, help="User request for the AI assistant.")
+    ai_chat.add_argument("--base-url", help="Override provider base URL. Defaults: Ollama 11434, LM Studio 1234/v1, OpenAI /v1.")
+    ai_chat.add_argument("--api-key", help="API key for OpenAI or compatible servers. OpenAI also reads OPENAI_API_KEY.")
+    ai_chat.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature.")
+    ai_chat.add_argument("--timeout", type=float, default=60.0, help="HTTP timeout in seconds.")
+    ai_chat.add_argument("--max-tool-calls", type=int, default=4, help="Maximum tool calls the model may request.")
+    ai_chat.add_argument("--tool", action="append", help="Restrict the model to a specific AutoPlay tool. Repeat to allow more tools.")
+    ai_chat.add_argument("--artifact-root", default="artifacts", help="Root for screenshots, reports, templates, and audit logs.")
+    ai_chat.add_argument("--audit-out", help="Write the AI bridge audit JSONL here. Defaults under artifact root.")
+    ai_chat.add_argument("--step-budget", type=int, default=20, help="Maximum number of agent tool calls for this chat session.")
+    ai_chat.add_argument("--allow-device-input", action="store_true", help="Allow real input only when model tool args also set execute=true.")
+    ai_chat.add_argument("--device-input-code", help="Require this code inside tool arguments before real device input is sent.")
+    ai_chat.add_argument("--adb-path", help="Override adb.exe/HD-Adb.exe path. Defaults to ignored local config when present.")
+    ai_chat.add_argument("--serial", help="ADB serial to target. Defaults to ignored local config when present.")
+    ai_chat.add_argument("--transcript-out", help="Optional sanitized transcript JSON output path.")
+    ai_chat.add_argument("--out", help="Optional output JSON path. Defaults to stdout.")
+    ai_chat.set_defaults(func=_ai_chat)
+
+    ai_chat_smoke = subparsers.add_parser("ai-chat-smoke", help="Smoke-test provider chat tool-loop behavior without an external model.")
+    ai_chat_smoke.add_argument("--artifact-root", default="artifacts", help="Root for generated smoke scripts, audit logs, and reports.")
+    ai_chat_smoke.add_argument("--audit-out", help="Write the AI bridge audit JSONL here. Defaults under artifact root.")
+    ai_chat_smoke.add_argument("--step-budget", type=int, default=20, help="Maximum number of agent tool calls for this smoke session.")
+    ai_chat_smoke.add_argument("--transcript-out", help="Optional sanitized transcript JSON output path.")
+    ai_chat_smoke.add_argument("--out", help="Optional output JSON path. Defaults to stdout.")
+    ai_chat_smoke.set_defaults(func=_ai_chat_smoke)
+
     ai_adapter = subparsers.add_parser("ai-adapter", help="Print MCP/local-client adapter tool metadata.")
     ai_adapter.add_argument("--prefix-names", action="store_true", help="Prefix tool names with autoplay. for clients that share a tool namespace.")
     ai_adapter.add_argument("--out", help="Optional output JSON path. Defaults to stdout.")
@@ -272,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (RunnerError, SafetyError, LiveClickRecorderError, ScriptError, ImageError, AiClientError, AiMcpSmokeError, OSError) as exc:
+    except (RunnerError, SafetyError, LiveClickRecorderError, ScriptError, ImageError, AiChatError, AiClientError, AiMcpSmokeError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
@@ -713,6 +743,71 @@ def _ai_examples(args: argparse.Namespace) -> int:
     else:
         print(response_text, end="")
     return 0
+
+
+def _ai_chat(args: argparse.Namespace) -> int:
+    result = run_ai_chat(
+        args.prompt,
+        AiChatConfig(
+            provider=args.provider,
+            model=args.model,
+            base_url=args.base_url,
+            api_key=args.api_key,
+            temperature=args.temperature,
+            timeout=args.timeout,
+            max_tool_calls=args.max_tool_calls,
+            allowed_tools=tuple(args.tool) if args.tool else None,
+        ),
+        bridge=AiBridge.from_local_config(
+            artifact_root=args.artifact_root,
+            audit_path=args.audit_out,
+            step_budget=args.step_budget,
+            allow_device_input=args.allow_device_input,
+            device_input_code=args.device_input_code,
+            adb_path=args.adb_path,
+            serial=args.serial,
+        ),
+    )
+    response_text = json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n"
+    if args.transcript_out:
+        transcript_text = json.dumps({"ok": result.ok, "transcript": result.transcript or []}, indent=2, sort_keys=True) + "\n"
+        _write_text_file(args.transcript_out, transcript_text)
+    if args.out:
+        _write_text_file(args.out, response_text)
+    else:
+        print(response_text, end="")
+    return 0 if result.ok else 1
+
+
+def _ai_chat_smoke(args: argparse.Namespace) -> int:
+    artifact_root = Path(args.artifact_root)
+    script_root = artifact_root / "scripts"
+    script_path = script_root / "ai-chat-smoke.yml"
+    result = run_ai_chat(
+        f"Smoke-test the provider chat tool loop by drafting a safe wait-only script. script:{script_path}",
+        AiChatConfig(
+            provider="fake",
+            model="draft_script",
+            max_tool_calls=1,
+            allowed_tools=("draft_script", "validate"),
+        ),
+        bridge=AiBridge.from_local_config(
+            artifact_root=artifact_root,
+            audit_path=args.audit_out,
+            step_budget=args.step_budget,
+            allow_device_input=False,
+            script_root=script_root,
+        ),
+    )
+    response_text = json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n"
+    if args.transcript_out:
+        transcript_text = json.dumps({"ok": result.ok, "transcript": result.transcript or []}, indent=2, sort_keys=True) + "\n"
+        _write_text_file(args.transcript_out, transcript_text)
+    if args.out:
+        _write_text_file(args.out, response_text)
+    else:
+        print(response_text, end="")
+    return 0 if result.ok else 1
 
 
 def _ai_adapter(args: argparse.Namespace) -> int:
